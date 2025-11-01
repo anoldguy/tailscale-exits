@@ -1,0 +1,31 @@
+# OpenTofu/Terraform state files (contain secrets!)
+*.tfstate
+*.tfstate.*
+**/*.tfstate
+**/*.tfstate.*
+*.tfplan
+terraform.tfvars
+
+# OpenTofu/Terraform directories
+**/.terraform
+**/.terraform.*
+
+# Build artifacts
+bin/
+lambda/bootstrap
+**/*.zip
+
+# IDE and local config
+.claude/
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Keep lock file for reproducible builds
+!.terraform.lock.hcl

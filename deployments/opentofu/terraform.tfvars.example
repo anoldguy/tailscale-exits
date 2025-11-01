@@ -1,0 +1,20 @@
+# terraform.tfvars.example - Example variable values for customization
+# Copy this file to terraform.tfvars and modify as needed
+
+# AWS region where the Lambda function will be deployed
+aws_region = "us-east-1"
+
+# Lambda function configuration
+lambda_function_name = "tailscale-exits"
+lambda_memory_size   = 256
+lambda_timeout       = 60
+
+# CloudWatch log retention (in days)
+log_retention_days = 14
+
+# Additional tags for all resources
+tags = {
+  Owner       = "your-name"
+  Environment = "production"
+  CostCenter  = "personal"
+}
