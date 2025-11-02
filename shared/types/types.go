@@ -4,15 +4,15 @@ import "time"
 
 // InstanceInfo represents information about a running exit node instance
 type InstanceInfo struct {
-	InstanceID       string    `json:"instance_id"`
-	Region           string    `json:"region"`
-	FriendlyRegion   string    `json:"friendly_region"`
-	State            string    `json:"state"`
-	PublicIP         string    `json:"public_ip,omitempty"`
-	PrivateIP        string    `json:"private_ip,omitempty"`
-	LaunchTime       time.Time `json:"launch_time"`
-	InstanceType     string    `json:"instance_type"`
-	TailscaleHostname string   `json:"tailscale_hostname,omitempty"`
+	InstanceID        string    `json:"instance_id"`
+	Region            string    `json:"region"`
+	FriendlyRegion    string    `json:"friendly_region"`
+	State             string    `json:"state"`
+	PublicIP          string    `json:"public_ip,omitempty"`
+	PrivateIP         string    `json:"private_ip,omitempty"`
+	LaunchTime        time.Time `json:"launch_time"`
+	InstanceType      string    `json:"instance_type"`
+	TailscaleHostname string    `json:"tailscale_hostname,omitempty"`
 }
 
 // StartRequest represents a request to start an exit node
@@ -34,10 +34,10 @@ type StopRequest struct {
 
 // StopResponse represents the response from stopping exit nodes
 type StopResponse struct {
-	Success           bool     `json:"success"`
-	Message           string   `json:"message"`
-	TerminatedCount   int      `json:"terminated_count"`
-	TerminatedIDs     []string `json:"terminated_ids,omitempty"`
+	Success         bool     `json:"success"`
+	Message         string   `json:"message"`
+	TerminatedCount int      `json:"terminated_count"`
+	TerminatedIDs   []string `json:"terminated_ids,omitempty"`
 }
 
 // InstancesRequest represents a request to list instances in a region

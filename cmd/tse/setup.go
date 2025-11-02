@@ -1,14 +1,12 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"flag"
 	"fmt"
 	"os"
 	"strings"
 
-	"github.com/anoldguy/tse/shared/onepassword"
 	"github.com/anoldguy/tse/shared/tailscale"
 )
 
@@ -19,7 +17,7 @@ Configure Tailscale for TSE ephemeral exit nodes
 This command automates the Tailscale account configuration:
   - Adds tag:exitnode to your ACL policy with auto-approval
   - Creates a reusable, ephemeral auth key
-  - Optionally stores the auth key in 1Password
+  - Displays the auth key for you to save (e.g., in .env file)
 
 Prerequisites:
   - TAILSCALE_API_TOKEN environment variable (API access token)
@@ -32,7 +30,6 @@ Required Flags:
 
 Optional Flags:
   --status              Check configuration status without changes
-  --show-auth-key       Display auth key instead of storing
   --show-acl-changes    Preview ACL changes without applying
   --skip-acl            Skip ACL configuration
   --skip-auth-key       Skip auth key creation
@@ -51,7 +48,6 @@ func runSetup(args []string) error {
 	}
 
 	statusOnly := fs.Bool("status", false, "Check configuration status without making changes")
-	showAuthKey := fs.Bool("show-auth-key", false, "Display auth key instead of storing in 1Password")
 	showACLChanges := fs.Bool("show-acl-changes", false, "Preview ACL changes without applying")
 	skipACL := fs.Bool("skip-acl", false, "Skip ACL configuration")
 	skipAuthKey := fs.Bool("skip-auth-key", false, "Skip auth key creation")
@@ -148,9 +144,9 @@ Example: tse setup --tailnet yourname@github`)
 
 	fmt.Println()
 
-	// Auth key storage
+	// Display auth key
 	if authKey != "" {
-		if err := storeAuthKey(ctx, authKey, *showAuthKey); err != nil {
+		if err := displayAuthKey(authKey); err != nil {
 			return err
 		}
 	}
@@ -160,10 +156,10 @@ Example: tse setup --tailnet yourname@github`)
 	fmt.Println("Setup complete! 🎉")
 	fmt.Println()
 	fmt.Println("Next steps:")
-	fmt.Println("1. Initialize OpenTofu (first time only): make tofu-init")
-	fmt.Println("2. Deploy Lambda: make deploy")
-	fmt.Println("3. Set Lambda URL: export TSE_LAMBDA_URL=$(cd deployments/opentofu && tofu output -raw lambda_function_url)")
-	fmt.Println("4. Test: tse ohio start")
+	fmt.Println("1. Add TAILSCALE_AUTH_KEY to your .env file (shown above)")
+	fmt.Println("2. Deploy Lambda: ./bin/tse deploy")
+	fmt.Println("3. Save TSE_AUTH_TOKEN and TSE_LAMBDA_URL from deploy output to .env")
+	fmt.Println("4. Test: ./bin/tse ohio start")
 	fmt.Println()
 
 	return nil
@@ -200,19 +196,14 @@ func runStatusCheck(ctx context.Context, client *tailscale.Client) error {
 	fmt.Printf("  - tag:exitnode owners: %s\n", strings.Join(owners, ", "))
 	fmt.Println("  - Exit node auto-approval: enabled")
 
-	// Check for auth key in 1Password
+	// Check for auth key in environment
 	fmt.Println()
-	if onepassword.IsInstalled() {
-		fmt.Print("Checking 1Password for auth key...")
-		if err := onepassword.Verify(ctx, onepassword.DefaultAuthKeyPath); err != nil {
-			fmt.Println(" not found")
-			fmt.Printf("  Auth key not found at: %s\n", onepassword.DefaultAuthKeyPath)
-		} else {
-			fmt.Println(" found")
-			fmt.Printf("  ✓ Auth key stored at: %s\n", onepassword.DefaultAuthKeyPath)
-		}
+	if authKey := os.Getenv("TAILSCALE_AUTH_KEY"); authKey != "" {
+		fmt.Println("✓ TAILSCALE_AUTH_KEY found in environment")
+		fmt.Println("  You're ready to deploy with: tse deploy")
 	} else {
-		fmt.Println("1Password CLI not installed (skipping auth key check)")
+		fmt.Println("⚠️  TAILSCALE_AUTH_KEY not set in environment")
+		fmt.Println("  After creating an auth key, add it to your .env file")
 	}
 
 	fmt.Println()
@@ -322,76 +313,15 @@ Create a new token at: https://login.tailscale.com/admin/settings/keys`)
 	return authKeyResp.Key, nil
 }
 
-func storeAuthKey(ctx context.Context, authKey string, showOnly bool) error {
-	fmt.Println("Step 3/3: Storing auth key securely")
-
-	if showOnly {
-		fmt.Println()
-		fmt.Println("Your Tailscale auth key:")
-		fmt.Println(authKey)
-		fmt.Println()
-		fmt.Println("Store this key securely and configure it in your OpenTofu variables.")
-		return nil
-	}
-
-	// Check if 1Password is available
-	if !onepassword.IsInstalled() {
-		fmt.Println()
-		fmt.Println("1Password CLI not found.")
-		fmt.Println()
-		fmt.Println("Your Tailscale auth key:")
-		fmt.Println(authKey)
-		fmt.Println()
-		fmt.Println("To install 1Password CLI: https://developer.1password.com/docs/cli/get-started/")
-		fmt.Println("Or store the key manually in your OpenTofu variables.")
-		return nil
-	}
-
-	// Prompt for storage method
+func displayAuthKey(authKey string) error {
+	fmt.Println("Step 3/3: Save your auth key")
 	fmt.Println()
-	fmt.Println("How should we store the auth key?")
-	fmt.Println("  1. 1Password (recommended)")
-	fmt.Println("  2. Display for manual copy")
-	fmt.Println("  3. Skip (I'll handle this myself)")
+	fmt.Println("Your Tailscale auth key:")
+	fmt.Println(authKey)
 	fmt.Println()
-	fmt.Print("Choice [1-3]: ")
-
-	reader := bufio.NewReader(os.Stdin)
-	choice, _ := reader.ReadString('\n')
-	choice = strings.TrimSpace(choice)
-
-	switch choice {
-	case "1", "":
-		// Store in 1Password
-		fmt.Printf("✓ Storing in 1Password at: %s\n", onepassword.DefaultAuthKeyPath)
-		if err := onepassword.Store(ctx, onepassword.DefaultAuthKeyPath, authKey); err != nil {
-			return fmt.Errorf("failed to store in 1Password: %w", err)
-		}
-
-		fmt.Print("✓ Verifying storage...")
-		if err := onepassword.Verify(ctx, onepassword.DefaultAuthKeyPath); err != nil {
-			fmt.Println(" failed")
-			return fmt.Errorf("failed to verify storage: %w", err)
-		}
-		fmt.Println(" done")
-
-	case "2":
-		// Display key
-		fmt.Println()
-		fmt.Println("Your Tailscale auth key:")
-		fmt.Println(authKey)
-		fmt.Println()
-		fmt.Println("Store this key securely and configure it in your OpenTofu variables.")
-
-	case "3":
-		// Skip
-		fmt.Println("Skipping auth key storage")
-		fmt.Println()
-		fmt.Println("Note: You'll need to configure the auth key manually in OpenTofu")
-
-	default:
-		return fmt.Errorf("invalid choice: %s", choice)
-	}
-
+	fmt.Println("Add this to your .env file:")
+	fmt.Printf("  TAILSCALE_AUTH_KEY=%s\n", authKey)
+	fmt.Println()
+	fmt.Println("Then you can deploy with: tse deploy")
 	return nil
 }

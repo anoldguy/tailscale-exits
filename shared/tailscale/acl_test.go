@@ -159,11 +159,11 @@ func TestEnsureAutoApprover(t *testing.T) {
 
 func TestConfigureForExitNodes(t *testing.T) {
 	tests := []struct {
-		name          string
-		policy        *ACLPolicy
-		owner         string
-		wantModified  bool
-		wantChanges   int // number of change messages
+		name         string
+		policy       *ACLPolicy
+		owner        string
+		wantModified bool
+		wantChanges  int // number of change messages
 	}{
 		{
 			name:         "configure empty policy",

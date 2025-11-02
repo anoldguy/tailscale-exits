@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 )
 
 const (
@@ -33,9 +34,11 @@ func NewClient(apiToken string) (*Client, error) {
 	}
 
 	return &Client{
-		apiToken:   apiToken,
-		baseURL:    DefaultBaseURL,
-		httpClient: &http.Client{},
+		apiToken: apiToken,
+		baseURL:  DefaultBaseURL,
+		httpClient: &http.Client{
+			Timeout: 30 * time.Second,
+		},
 	}, nil
 }
 

@@ -34,12 +34,12 @@ type AuthKeyDeviceCreate struct {
 
 // AuthKeyResponse represents the response when creating an auth key
 type AuthKeyResponse struct {
-	ID            string              `json:"id"`
-	Key           string              `json:"key"`
-	Created       string              `json:"created"`
-	Expires       string              `json:"expires"`
-	Capabilities  AuthKeyCapabilities `json:"capabilities"`
-	Description   string              `json:"description,omitempty"`
+	ID           string              `json:"id"`
+	Key          string              `json:"key"`
+	Created      string              `json:"created"`
+	Expires      string              `json:"expires"`
+	Capabilities AuthKeyCapabilities `json:"capabilities"`
+	Description  string              `json:"description,omitempty"`
 }
 
 // CreateAuthKey creates a new auth key with the specified capabilities

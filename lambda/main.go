@@ -273,9 +273,9 @@ func handleCleanupResources(ctx context.Context, friendlyRegion string) (events.
 	}
 
 	response := types.StopResponse{
-		Message:          fmt.Sprintf("Cleaned up all TSE resources in %s", friendlyRegion),
-		TerminatedIDs:    cleanedResources,
-		TerminatedCount:  len(cleanedResources),
+		Message:         fmt.Sprintf("Cleaned up all TSE resources in %s", friendlyRegion),
+		TerminatedIDs:   cleanedResources,
+		TerminatedCount: len(cleanedResources),
 	}
 
 	log.Printf("Cleanup completed in region %s: %v", friendlyRegion, cleanedResources)

@@ -1,9 +1,11 @@
 package aws
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"fmt"
+	"text/template"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -46,16 +48,15 @@ func New(ctx context.Context, region string) (*Service, error) {
 	}, nil
 }
 
-// generateUserData creates the user data script for Tailscale installation
-func generateUserData(authKey, friendlyRegion string) string {
-	script := `#!/bin/bash
+// userDataTemplate defines the bash script for Tailscale installation
+const userDataTemplate = `#!/bin/bash
 set -e
 
 # Install Tailscale
 curl -fsSL https://tailscale.com/install.sh | sh
 
 # Start Tailscale with exit node advertisement
-tailscale up --authkey=` + authKey + ` --advertise-exit-node --hostname=exit-` + friendlyRegion + `
+tailscale up --authkey={{.AuthKey}} --advertise-exit-node --hostname=exit-{{.Region}}
 
 # Enable IP forwarding
 echo 'net.ipv4.ip_forward = 1' >> /etc/sysctl.conf
@@ -63,9 +64,23 @@ echo 'net.ipv6.conf.all.forwarding = 1' >> /etc/sysctl.conf
 sysctl -p
 
 # Log completion
-echo "Tailscale exit node setup complete for region: ` + friendlyRegion + `" | logger -t tse-setup
+echo "Tailscale exit node setup complete for region: {{.Region}}" | logger -t tse-setup
 `
-	return base64.StdEncoding.EncodeToString([]byte(script))
+
+var userDataTmpl = template.Must(template.New("userdata").Parse(userDataTemplate))
+
+// generateUserData creates the user data script for Tailscale installation
+func generateUserData(authKey, friendlyRegion string) string {
+	var buf bytes.Buffer
+	err := userDataTmpl.Execute(&buf, map[string]string{
+		"AuthKey": authKey,
+		"Region":  friendlyRegion,
+	})
+	if err != nil {
+		// Template execution should never fail with a constant template
+		panic(fmt.Sprintf("failed to execute user data template: %v", err))
+	}
+	return base64.StdEncoding.EncodeToString(buf.Bytes())
 }
 
 // findOrCreateSecurityGroup ensures our security group exists with proper rules in the specified VPC

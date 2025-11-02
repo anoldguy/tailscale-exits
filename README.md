@@ -39,16 +39,15 @@ A hobby tool to create on-demand Tailscale VPN exit nodes in AWS. Spin up exit n
 
 **Already have TSE configured?** Jump to [Usage](#usage)
 
-**First time?** Follow the [Complete Setup](#complete-setup-15-minutes) below (takes about 15 minutes).
+**First time?** Follow the [Complete Setup](#complete-setup-10-minutes) below (takes about 10 minutes).
 
-## Complete Setup (15 minutes)
+## Complete Setup (10 minutes)
 
 ### Prerequisites
 
 You need:
 - **Tailscale** account and client installed (free tier works)
 - **AWS** account with CLI configured (`aws configure`)
-- **1Password** CLI (optional - [install guide](https://developer.1password.com/docs/cli/get-started/))
 
 Not sure if you have these? Run:
 ```bash
@@ -69,8 +68,16 @@ aws sts get-caller-identity  # Should show your AWS account
 ```bash
 git clone https://github.com/anoldguy/tailscale-exits
 cd tailscale-exits
-export TAILSCALE_API_TOKEN=tskey-api-xxxxx
 make build-cli
+
+# Create .env file with your API token
+cp .env.example .env
+# Edit .env and add your TAILSCALE_API_TOKEN
+
+# Or export directly
+export TAILSCALE_API_TOKEN=tskey-api-xxxxx
+
+# Run setup
 ./bin/tse setup --tailnet yourname@github  # Use your tailnet name
 ```
 
@@ -79,31 +86,43 @@ Find your tailnet name by running `tailscale status` or checking your admin cons
 This command will:
 - Configure your Tailscale ACL for exit node auto-approval
 - Create an auth key for exit nodes
-- Optionally store it in 1Password
+- Display the key for you to save in your `.env` file
 
-### Step 2: Deploy to AWS (8 minutes)
+### Step 2: Deploy to AWS (3 minutes)
 
 ```bash
-# Initialize OpenTofu (first time only)
-make tofu-init
+# Add the Tailscale auth key to .env (from setup output)
+# Edit .env and add:
+#   TAILSCALE_AUTH_KEY=tskey-auth-xxxxx
 
-# Deploy everything
-make deploy
+# Or export directly
+export TAILSCALE_AUTH_KEY=tskey-auth-xxxxx
 
-# Save the Lambda URL and auth token
-export TSE_LAMBDA_URL=$(cd deployments/opentofu && tofu output -raw lambda_function_url)
-export TSE_AUTH_TOKEN=$(cd deployments/opentofu && tofu output -raw auth_token)
+# Deploy infrastructure
+./bin/tse deploy
 
-# Add to your shell profile for persistence
-echo "export TSE_LAMBDA_URL=$TSE_LAMBDA_URL" >> ~/.bashrc
-echo "export TSE_AUTH_TOKEN=$TSE_AUTH_TOKEN" >> ~/.bashrc
+# The deploy output will show TSE_AUTH_TOKEN and TSE_LAMBDA_URL
+# Add these to your .env file for persistence
 ```
 
-OpenTofu will show you what it's creating. Type `yes` to proceed.
+The deploy will create:
+- Lambda function for the API
+- IAM roles and policies
+- CloudWatch log group
+- Function URL endpoint
+
+Save the environment variables to your `.env` file so they persist across sessions.
 
 ### Step 3: Test It (2 minutes)
 
 ```bash
+# Make sure env vars are loaded
+source .env
+
+# Or if using direnv:
+echo 'dotenv' > .envrc
+direnv allow
+
 # Start an exit node in Ohio
 ./bin/tse ohio start
 
@@ -137,8 +156,11 @@ OpenTofu will show you what it's creating. Type `yes` to proceed.
 # Stop exit nodes in ALL regions (prevents surprise bills!)
 ./bin/tse shutdown
 
-# Check setup status
-./bin/tse setup --status
+# Check infrastructure status
+./bin/tse status
+
+# Check Tailscale setup status
+./bin/tse setup --tailnet yourname@github --status
 ```
 
 ## Available Regions
@@ -149,12 +171,18 @@ Use friendly names instead of AWS region codes:
 - `virginia` (us-east-1)
 - `oregon` (us-west-2)
 - `california` (us-west-1)
+- `canada` (ca-central-1)
 - `ireland` (eu-west-1)
 - `london` (eu-west-2)
 - `frankfurt` (eu-central-1)
+- `paris` (eu-west-3)
+- `stockholm` (eu-north-1)
 - `tokyo` (ap-northeast-1)
+- `seoul` (ap-northeast-2)
 - `sydney` (ap-southeast-2)
 - `singapore` (ap-southeast-1)
+- `mumbai` (ap-south-1)
+- `saopaulo` (sa-east-1)
 
 ## How It Works
 
@@ -167,6 +195,8 @@ Use friendly names instead of AWS region codes:
 ## What This Costs You
 
 **TL;DR: Most hobby users spend $1-5/month**
+
+> **⚠️ Real Talk:** This uses t4g.nano ARM instances by default, which are **NOT AWS free tier**. If you're on a new AWS account hoping for free, you need t2.micro (Intel) instead. See [DIY.md FAQ](DIY.md#faq) for the swap. The irony is t4g.nano is cheaper long-term ($3/month vs $7/month if running 24/7), but free tier folks gotta do free tier things.
 
 ### When Exit Nodes Are Running
 
@@ -210,9 +240,11 @@ Use friendly names instead of AWS region codes:
 
 ### What Gets Created in AWS
 
-Each time you deploy:
+When you run `tse deploy`:
 - **Lambda Function** (ephemeral exit node API) - Free tier
 - **IAM Role** (Lambda permissions) - Free
+- **IAM Policies** (Lambda execution permissions) - Free
+- **CloudWatch Log Group** (Lambda logs) - Free (14 day retention)
 - **Function URL** (HTTP endpoint) - Free
 
 Each time you start an exit node in a region (first time):
@@ -237,7 +269,7 @@ Everything except running EC2 instances is free. VPCs and networking components 
 ./bin/tse <region> stop
 
 # Remove all AWS infrastructure (Lambda, IAM roles, etc.)
-make tofu-destroy
+./bin/tse teardown
 ```
 
 ## Security
@@ -248,7 +280,7 @@ TSE uses token-based authentication to protect the Lambda Function URL. A random
 
 ```bash
 # View your current auth token
-cd deployments/opentofu && tofu output -raw auth_token
+echo $TSE_AUTH_TOKEN
 ```
 
 The CLI automatically includes this token in all requests via the `TSE_AUTH_TOKEN` environment variable.
@@ -258,12 +290,13 @@ The CLI automatically includes this token in all requests via the `TSE_AUTH_TOKE
 If your token is compromised, rotate it:
 
 ```bash
-cd deployments/opentofu
-tofu taint random_id.lambda_auth_token
-tofu apply
+# Unset the old token
+unset TSE_AUTH_TOKEN
 
-# Update your env var
-export TSE_AUTH_TOKEN=$(tofu output -raw auth_token)
+# Redeploy (will generate new token)
+./bin/tse deploy
+
+# Update your .env file with the new token
 ```
 
 The old token is immediately invalidated when the new Lambda deploys.
@@ -271,7 +304,7 @@ The old token is immediately invalidated when the new Lambda deploys.
 ### What's Protected
 
 - ✅ Lambda Function URL requires valid token
-- ✅ Token stored securely in OpenTofu state
+- ✅ Token stored in environment variables
 - ✅ 256-bit entropy (same as good API keys)
 - ✅ Constant-time comparison prevents timing attacks
 
@@ -294,7 +327,7 @@ In Tailscale Admin Console → Settings → Keys, create a key with:
 - ✅ Tagged with `tag:exitnode`
 - ✅ Pre-approved
 
-Store it in 1Password at `op://private/Tailscale/CurrentAuthKey` or set it directly in your OpenTofu variables.
+Add it to your `.env` file as `TAILSCALE_AUTH_KEY`.
 
 #### 2. Update ACL Policy
 Add this to your Tailscale ACL at https://login.tailscale.com/admin/acls:
@@ -320,23 +353,25 @@ This configuration:
 You can also call the Lambda endpoints directly with curl:
 
 ```bash
-# Get the Lambda URL
-LAMBDA_URL=$(cd deployments/opentofu && tofu output -raw lambda_function_url)
-
-# Health check
-curl -X GET "$LAMBDA_URL/"
+# Health check (requires auth token)
+curl -H "Authorization: Bearer $TSE_AUTH_TOKEN" \
+  -X GET "$TSE_LAMBDA_URL/"
 
 # List instances in a region
-curl -X GET "$LAMBDA_URL/{region}/instances"
+curl -H "Authorization: Bearer $TSE_AUTH_TOKEN" \
+  -X GET "$TSE_LAMBDA_URL/{region}/instances"
 
 # Start an exit node
-curl -X POST "$LAMBDA_URL/{region}/start"
+curl -H "Authorization: Bearer $TSE_AUTH_TOKEN" \
+  -X POST "$TSE_LAMBDA_URL/{region}/start"
 
 # Stop all instances in a region
-curl -X POST "$LAMBDA_URL/{region}/stop"
+curl -H "Authorization: Bearer $TSE_AUTH_TOKEN" \
+  -X POST "$TSE_LAMBDA_URL/{region}/stop"
 
 # Force cleanup all resources in a region
-curl -X POST "$LAMBDA_URL/{region}/cleanup"
+curl -H "Authorization: Bearer $TSE_AUTH_TOKEN" \
+  -X POST "$TSE_LAMBDA_URL/{region}/cleanup"
 ```
 
 Replace `{region}` with any friendly region name (ohio, virginia, etc.).
@@ -345,19 +380,41 @@ Replace `{region}` with any friendly region name (ohio, virginia, etc.).
 
 ```bash
 # Check current configuration without making changes
-./bin/tse setup --status
-
-# Display auth key instead of storing in 1Password
-./bin/tse setup --show-auth-key
+./bin/tse setup --tailnet yourname@github --status
 
 # Preview ACL changes without applying
-./bin/tse setup --show-acl-changes
+./bin/tse setup --tailnet yourname@github --show-acl-changes
 
 # Skip ACL configuration (only create auth key)
-./bin/tse setup --skip-acl
+./bin/tse setup --tailnet yourname@github --skip-acl
 
 # Skip auth key creation (only configure ACL)
-./bin/tse setup --skip-auth-key
+./bin/tse setup --tailnet yourname@github --skip-auth-key
+```
+
+### Environment Variable Management
+
+**Using direnv (recommended):**
+```bash
+cp .env.example .env
+# Edit .env and add your secrets
+echo 'dotenv' > .envrc
+direnv allow
+```
+
+**Using manual source:**
+```bash
+cp .env.example .env
+# Edit .env and add your secrets
+source .env
+```
+
+**Using direct exports:**
+```bash
+export TAILSCALE_API_TOKEN=tskey-api-xxxxx
+export TAILSCALE_AUTH_KEY=tskey-auth-xxxxx
+export TSE_AUTH_TOKEN=xxxxx
+export TSE_LAMBDA_URL=https://xxxxx.lambda-url.us-east-2.on.aws/
 ```
 
 ---

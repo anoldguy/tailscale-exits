@@ -5,7 +5,7 @@ Don't trust compiled binaries? Prefer curl? This guide shows you how to do every
 **What this guide covers:**
 - Configuring Tailscale ACL with raw API calls
 - Creating Tailscale auth keys with curl
-- Deploying the Lambda with OpenTofu
+- Deploying infrastructure with auditable Go code
 - Managing exit nodes with curl (no CLI needed)
 
 **Why you might want this:**
@@ -143,7 +143,7 @@ echo -n "$AUTH_KEY" | op item create \
   --vault=private \
   CurrentAuthKey[password]=-
 
-# Or just save it somewhere secure for OpenTofu
+# Or just save it somewhere secure for deployment
 echo "TAILSCALE_AUTH_KEY=$AUTH_KEY" >> .env
 ```
 
@@ -156,60 +156,195 @@ echo "TAILSCALE_AUTH_KEY=$AUTH_KEY" >> .env
 
 ---
 
-## Part 2: Deploy Lambda with OpenTofu
+## Part 2: Deploy Lambda Infrastructure (AWS CLI)
 
-No special tools needed here - just OpenTofu directly.
+Deploy everything using raw AWS CLI commands. No compiled tools needed.
 
 ### Step 1: Build the Lambda Function
 
 ```bash
+# Compile Lambda for ARM64
 cd lambda
-GOOS=linux GOARCH=arm64 go build -o bootstrap .
-zip lambda-deployment.zip bootstrap
+GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o bootstrap .
+
+# Create deployment zip
+zip lambda.zip bootstrap
+cd ..
 ```
 
-### Step 2: Configure OpenTofu Variables
-
-If using 1Password:
-```bash
-cd ../deployments/opentofu
-
-# OpenTofu will automatically call one_password.sh to fetch the auth key
-# Make sure you're signed into 1Password CLI: op signin
-```
-
-If NOT using 1Password, create `terraform.tfvars`:
-```hcl
-tailscale_auth_key = "tskey-auth-xxxxx"
-```
-
-### Step 3: Deploy Infrastructure
+### Step 2: Create CloudWatch Log Group
 
 ```bash
-# Initialize (first time only)
-tofu init
+aws logs create-log-group \
+  --log-group-name /aws/lambda/tailscale-exits \
+  --tags ManagedBy=tse
 
-# Review what will be created
-tofu plan
-
-# Deploy everything
-tofu apply
-
-# Get the Lambda URL and auth token
-LAMBDA_URL=$(tofu output -raw lambda_function_url)
-TSE_AUTH_TOKEN=$(tofu output -raw auth_token)
-
-echo "Lambda URL: $LAMBDA_URL"
-echo "Auth Token: $TSE_AUTH_TOKEN"
+aws logs put-retention-policy \
+  --log-group-name /aws/lambda/tailscale-exits \
+  --retention-in-days 14
 ```
 
-**What gets created:**
-- Lambda function (ARM64, ~10MB zip)
-- IAM role with EC2 permissions
-- Lambda Function URL (public HTTP endpoint)
-- Random 256-bit auth token (stored in Lambda env var)
+### Step 3: Create IAM Role
 
-**Cost:** All free tier (Lambda is free for hobby usage)
+```bash
+# Create trust policy for Lambda
+cat > /tmp/trust-policy.json <<'EOF'
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Principal": {"Service": "lambda.amazonaws.com"},
+    "Action": "sts:AssumeRole"
+  }]
+}
+EOF
+
+# Create the role
+aws iam create-role \
+  --role-name tailscale-exits-lambda-role \
+  --assume-role-policy-document file:///tmp/trust-policy.json \
+  --tags Key=ManagedBy,Value=tse
+
+# Attach AWS Lambda basic execution policy
+aws iam attach-role-policy \
+  --role-name tailscale-exits-lambda-role \
+  --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+```
+
+### Step 4: Create Inline Policy for EC2 Access
+
+```bash
+cat > /tmp/ec2-policy.json <<'EOF'
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ec2:RunInstances", "ec2:TerminateInstances",
+        "ec2:DescribeInstances", "ec2:DescribeInstanceStatus",
+        "ec2:DescribeImages", "ec2:CreateSecurityGroup",
+        "ec2:DeleteSecurityGroup", "ec2:DescribeSecurityGroups",
+        "ec2:AuthorizeSecurityGroupIngress", "ec2:AuthorizeSecurityGroupEgress",
+        "ec2:RevokeSecurityGroupIngress", "ec2:RevokeSecurityGroupEgress",
+        "ec2:DescribeVpcs", "ec2:CreateVpc", "ec2:DescribeSubnets",
+        "ec2:CreateSubnet", "ec2:ModifySubnetAttribute",
+        "ec2:DescribeAvailabilityZones", "ec2:DescribeRouteTables",
+        "ec2:CreateRoute", "ec2:DescribeInternetGateways",
+        "ec2:CreateInternetGateway", "ec2:AttachInternetGateway",
+        "ec2:DetachInternetGateway", "ec2:DeleteInternetGateway",
+        "ec2:DeleteSubnet", "ec2:DeleteVpc", "ec2:DeleteRoute",
+        "ec2:CreateTags", "ec2:DescribeTags"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": ["ssm:GetParameter", "ssm:GetParameters"],
+      "Resource": [
+        "arn:aws:ssm:*:*:parameter/aws/service/ami-amazon-linux-latest/*",
+        "arn:aws:ssm:*:*:parameter/aws/service/canonical/ubuntu/server/*"
+      ]
+    }
+  ]
+}
+EOF
+
+aws iam put-role-policy \
+  --role-name tailscale-exits-lambda-role \
+  --policy-name tailscale-exits-lambda-ec2-policy \
+  --policy-document file:///tmp/ec2-policy.json
+```
+
+### Step 5: Wait for IAM Propagation
+
+```bash
+# IAM is eventually consistent - give it time to propagate
+echo "Waiting 10 seconds for IAM propagation..."
+sleep 10
+```
+
+### Step 6: Generate Auth Token
+
+```bash
+# Generate a random 256-bit token
+TSE_AUTH_TOKEN=$(openssl rand -hex 32)
+echo "Generated TSE_AUTH_TOKEN: $TSE_AUTH_TOKEN"
+echo "Save this token - you'll need it for all API calls!"
+```
+
+### Step 7: Create Lambda Function
+
+```bash
+# Get the role ARN
+ROLE_ARN=$(aws iam get-role \
+  --role-name tailscale-exits-lambda-role \
+  --query 'Role.Arn' \
+  --output text)
+
+# Create Lambda function
+aws lambda create-function \
+  --function-name tailscale-exits \
+  --runtime provided.al2023 \
+  --role "$ROLE_ARN" \
+  --handler bootstrap \
+  --architectures arm64 \
+  --memory-size 256 \
+  --timeout 60 \
+  --zip-file fileb://lambda/lambda.zip \
+  --environment Variables="{TAILSCALE_AUTH_KEY=$TAILSCALE_AUTH_KEY,TSE_AUTH_TOKEN=$TSE_AUTH_TOKEN}" \
+  --tags ManagedBy=tse
+```
+
+### Step 8: Create Function URL
+
+```bash
+# Create Function URL with NONE auth (we use Bearer tokens)
+aws lambda create-function-url-config \
+  --function-name tailscale-exits \
+  --auth-type NONE \
+  --cors '{
+    "AllowCredentials": false,
+    "AllowOrigins": ["*"],
+    "AllowMethods": ["GET", "POST", "DELETE"],
+    "AllowHeaders": ["date", "keep-alive", "content-type", "authorization"],
+    "ExposeHeaders": ["date", "keep-alive"],
+    "MaxAge": 86400
+  }'
+
+# Add permission for public invocation
+aws lambda add-permission \
+  --function-name tailscale-exits \
+  --statement-id FunctionURLAllowPublicAccess \
+  --action lambda:InvokeFunctionUrl \
+  --principal '*' \
+  --function-url-auth-type NONE
+
+# Get the Function URL
+TSE_LAMBDA_URL=$(aws lambda get-function-url-config \
+  --function-name tailscale-exits \
+  --query 'FunctionUrl' \
+  --output text)
+
+echo "Lambda URL: $TSE_LAMBDA_URL"
+```
+
+### Step 9: Save Your Credentials
+
+```bash
+echo "Save these environment variables:"
+echo "export TSE_LAMBDA_URL=$TSE_LAMBDA_URL"
+echo "export TSE_AUTH_TOKEN=$TSE_AUTH_TOKEN"
+```
+
+**What you created:**
+- CloudWatch Log Group (14 day retention)
+- IAM Role with EC2/VPC permissions
+- Lambda Function (ARM64, ~10MB)
+- Function URL (public HTTP endpoint)
+- Auth token for API security
+
+**Cost:** All free tier (Lambda free for hobby usage)
 
 ---
 
@@ -220,8 +355,8 @@ Now you can manage exit nodes without the CLI at all. All requests require authe
 ### Set Up Auth Token
 
 ```bash
-# Get your token from OpenTofu output
-export TSE_AUTH_TOKEN=$(cd deployments/opentofu && tofu output -raw auth_token)
+# Use the token from your deploy output
+export TSE_AUTH_TOKEN="<from-deploy-output>"
 ```
 
 ### Health Check
@@ -454,16 +589,37 @@ make test
 
 ### Remove All AWS Infrastructure
 
+Delete everything in reverse order of creation:
+
 ```bash
-cd deployments/opentofu
-tofu destroy
+# 1. Delete Function URL
+aws lambda delete-function-url-config \
+  --function-name tailscale-exits
+
+# 2. Delete Lambda function
+aws lambda delete-function \
+  --function-name tailscale-exits
+
+# 3. Delete inline policy
+aws iam delete-role-policy \
+  --role-name tailscale-exits-lambda-role \
+  --policy-name tailscale-exits-lambda-ec2-policy
+
+# 4. Detach managed policy
+aws iam detach-role-policy \
+  --role-name tailscale-exits-lambda-role \
+  --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+# 5. Delete IAM role
+aws iam delete-role \
+  --role-name tailscale-exits-lambda-role
+
+# 6. Delete CloudWatch log group
+aws logs delete-log-group \
+  --log-group-name /aws/lambda/tailscale-exits
 ```
 
-This removes:
-- Lambda function
-- IAM role
-- Function URL
-- Any remaining VPCs/instances in all regions
+**Note:** If you have running exit nodes, stop them first using the curl commands from Part 3, or manually terminate instances via AWS console.
 
 ### Revoke Tailscale Auth Key (Optional)
 
@@ -488,9 +644,6 @@ A: Yes, but it only creates resources in YOUR AWS account. An attacker could spi
 **Q: Can I use this without the Go CLI tool at all?**
 A: Absolutely! That's the point of this guide. Use curl, integrate into your shell scripts, whatever.
 
-**Q: What about Terraform instead of OpenTofu?**
-A: The configs are compatible. Replace `tofu` with `terraform` in all commands.
-
 **Q: How do I add more regions?**
 A: Edit `shared/regions/regions.go`, add your region mapping, rebuild Lambda and CLI. No other changes needed.
 
@@ -510,13 +663,16 @@ A: Yes! If you're within your first 12 months of AWS and want to use the free ti
    ```bash
    cd lambda
    GOOS=linux GOARCH=amd64 go build -o bootstrap .  # Note: amd64, not arm64
-   zip lambda-deployment.zip bootstrap
+   zip lambda.zip bootstrap
+   cd ..
    ```
 
-3. **Redeploy**:
+3. **Update Lambda function**:
    ```bash
-   cd ../deployments/opentofu
-   tofu apply
+   aws lambda update-function-code \
+     --function-name tailscale-exits \
+     --zip-file fileb://lambda/lambda.zip \
+     --architectures x86_64
    ```
 
 **Cost comparison:**
@@ -545,7 +701,6 @@ A: It is! Just use Mullvad or ProtonVPN if you want simple. This is for tinkerer
 **What you're trusting:**
 - ✅ Tailscale (already using it)
 - ✅ AWS (already using it)
-- ✅ OpenTofu/Terraform (open source, auditable)
 - ⚠️  This Go code (small, auditable, but still code from the internet)
 
 **What you're NOT trusting:**
@@ -561,7 +716,7 @@ A: It is! Just use Mullvad or ProtonVPN if you want simple. This is for tinkerer
 - ✅ Prevents unauthorized Lambda invocations
 - ✅ 256-bit entropy (same as good API keys)
 - ✅ Constant-time comparison (prevents timing attacks)
-- ✅ Token rotation supported (`tofu taint random_id.lambda_auth_token`)
+- ✅ Token rotation supported (generate new token and update Lambda)
 
 **What auth does NOT protect:**
 - ⚠️ Lambda still creates resources in YOUR AWS account
@@ -570,7 +725,19 @@ A: It is! Just use Mullvad or ProtonVPN if you want simple. This is for tinkerer
 
 **Mitigations:**
 - Set up AWS billing alerts for unexpected charges
-- Rotate token if compromised: `cd deployments/opentofu && tofu taint random_id.lambda_auth_token && tofu apply`
+- Rotate token if compromised:
+  ```bash
+  # Generate new token
+  NEW_TOKEN=$(openssl rand -hex 32)
+
+  # Update Lambda environment variables
+  aws lambda update-function-configuration \
+    --function-name tailscale-exits \
+    --environment Variables="{TAILSCALE_AUTH_KEY=$TAILSCALE_AUTH_KEY,TSE_AUTH_TOKEN=$NEW_TOKEN}"
+
+  # Update your local .env file
+  echo "TSE_AUTH_TOKEN=$NEW_TOKEN" >> .env
+  ```
 - Review CloudTrail logs periodically
 - Restrict Lambda Function URL to your IP via AWS WAF (if extra paranoid)
 

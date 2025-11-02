@@ -1,7 +1,7 @@
-.PHONY: test build-lambda build-cli clean deps deploy tofu-init tofu-init-upgrade tofu-plan tofu-apply tofu-destroy
+.PHONY: test build-lambda build-cli clean deps install-cli regions
 
 # Default target
-all: test build-lambda build-cli
+all: test build-cli
 
 # Download dependencies
 deps:
@@ -36,46 +36,9 @@ clean:
 	rm -f cmd/tse/tse
 	rm -rf bin/
 	rm -f lambda/*.zip
-	rm -f deployments/opentofu/*.zip
-	rm -f deployments/opentofu/*.tfplan
-
-# Package Lambda for deployment
-package-lambda: build-lambda
-	cd lambda && zip lambda-deployment.zip bootstrap
+	go clean -testcache -cache
 
 # Show available regions
 regions:
 	@echo "Available regions:"
-	@go run -c 'import "github.com/anoldguy/tse/shared/regions"; fmt.Println(regions.GetAvailableRegions())'
-
-# OpenTofu/Terraform deployment targets
-
-# Initialize OpenTofu (run once before first deployment)
-tofu-init:
-	cd deployments/opentofu && tofu init
-
-# Upgrade OpenTofu providers (manual step when you want latest providers)
-tofu-init-upgrade:
-	cd deployments/opentofu && tofu init -upgrade
-
-# Plan infrastructure changes
-tofu-plan: package-lambda
-	cd deployments/opentofu && tofu plan
-
-# Apply infrastructure changes
-tofu-apply: package-lambda
-	cd deployments/opentofu && tofu apply
-
-# Deploy everything (clean build + apply infrastructure)
-deploy: clean tofu-init tofu-apply
-	@echo ""
-	@echo "✓ Deployment complete!"
-	@echo ""
-	@echo "Set your environment variables:"
-	@echo "  export TSE_LAMBDA_URL=\$$(cd deployments/opentofu && tofu output -raw lambda_function_url)"
-	@echo "  export TSE_AUTH_TOKEN=\$$(cd deployments/opentofu && tofu output -raw auth_token)"
-
-# Destroy all infrastructure
-tofu-destroy:
-	@echo "WARNING: This will destroy all TSE infrastructure in AWS"
-	@cd deployments/opentofu && tofu destroy
+	@echo "ohio, virginia, oregon, california, canada, ireland, london, paris, frankfurt, stockholm, singapore, sydney, tokyo, seoul, mumbai, saopaulo"
