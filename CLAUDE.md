@@ -6,20 +6,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 TSE (Tailscale Ephemeral Exit Nodes) is a tool for creating on-demand Tailscale VPN exit nodes in AWS. The system consists of:
 - **Lambda Function**: HTTP endpoint for provisioning AWS infrastructure
-- **CLI Tool**: User-friendly command-line interface for managing exit nodes
+- **CLI Tool**: User-friendly command-line interface for managing exit nodes and deploying infrastructure
 - **Shared Libraries**: Common types and region mapping utilities
 
 ## Development Commands
 
 ### Building
 ```bash
-# Build Lambda function (ARM64 for AWS)
-make build-lambda
-
 # Build CLI tool for local use
 make build-cli
 
-# Build both
+# Build Lambda function (ARM64 for AWS) - optional, deploy does this
+make build-lambda
+
+# Build and test
 make all
 ```
 
@@ -34,34 +34,36 @@ make test-verbose
 
 ### Deployment
 ```bash
-# First time: Initialize OpenTofu providers (one-time)
-make tofu-init
+# Deploy AWS infrastructure (Lambda, IAM, logs, Function URL)
+./bin/tse deploy
 
-# Full deployment (clean build + infrastructure)
-make deploy
+# Check deployment status
+./bin/tse status
 
-# Individual OpenTofu operations
-make tofu-plan           # Preview infrastructure changes
-make tofu-apply          # Apply infrastructure changes
-make tofu-init-upgrade   # Upgrade providers (manual, when desired)
-make tofu-destroy        # Destroy all infrastructure
-
-# Get Lambda URL for CLI usage
-export TSE_LAMBDA_URL=$(cd deployments/opentofu && tofu output -raw lambda_function_url)
+# Remove all infrastructure
+./bin/tse teardown
 ```
 
 **Deployment Flow:**
-- `make deploy` runs: clean → tofu-init → tofu-apply → package-lambda → build-lambda
-- Ensures Lambda is always rebuilt cleanly before deployment
-- Uses provider lock file for reproducible deployments
-- Run `make tofu-init-upgrade` manually when you want to upgrade providers
+- `tse deploy` compiles Lambda from source, creates all AWS resources
+- Uses tag-based discovery (`ManagedBy=tse`) for state management
+- Idempotent - safe to re-run
+- No local state files required
+
+**Environment Variables Required:**
+- `TAILSCALE_AUTH_KEY` - For Lambda to join exit nodes to your network
+- `TSE_AUTH_TOKEN` - Generated during deploy, used for Lambda API auth
+- `TSE_LAMBDA_URL` - Function URL, output by deploy
+
+Store these in `.env` file (see `.env.example`).
 
 ### Using the CLI
 ```bash
 # Build and test CLI locally
 make build-cli
-./bin/tse health
-./bin/tse ohio start
+./bin/tse status        # Check infrastructure deployment
+./bin/tse health        # Check Lambda health
+./bin/tse ohio start    # Start exit node
 ./bin/tse ohio instances
 ./bin/tse ohio stop
 ```
@@ -70,25 +72,40 @@ make build-cli
 
 ### File Structure
 ```
-cmd/tse/          # CLI tool (setup command, region operations)
+cmd/tse/
+  infrastructure/   # Native AWS deployment (discovery, create, delete, setup, teardown)
+  *.go             # CLI commands (setup, deploy, status, teardown, region operations)
 lambda/           # Lambda handler + AWS service layer
 shared/
   regions/        # Friendly name ↔ AWS region mapping
   types/          # Request/response types (Lambda ↔ CLI)
   tailscale/      # Tailscale API client + ACL logic
-  onepassword/    # 1Password CLI integration
 ```
 
-### Tagging Strategy (Critical!)
+### Infrastructure Management
 
-**All AWS resources are tagged:**
+**Native Go Deployment:**
+- No external tools required (no Terraform/OpenTofu)
+- Uses AWS SDK v2 (IAM, Lambda, CloudWatch Logs)
+- Tag-based resource discovery
+- Creates 6 resources: Log Group, IAM Role, 2 Policies, Lambda Function, Function URL
+
+**Tagging Strategy for Infrastructure:**
+All managed infrastructure resources tagged with:
+- `ManagedBy=tse`
+
+**Tagging Strategy for Exit Nodes:**
+All EC2 resources (instances, VPCs, etc.) tagged with:
 - `Project=tse`
 - `Type=ephemeral`
 - `Region=<friendly-region>`
 
-**Why this matters:** Cleanup relies entirely on these tags. If you manually create resources without tags, `tse stop` won't find them. If you modify tags, cleanup will break.
+**Why this matters:**
+- Infrastructure discovery relies on `ManagedBy=tse` tag
+- Cleanup for exit nodes relies on `Project=tse` and `Type=ephemeral`
+- If you manually create resources without tags, cleanup won't find them
 
-**Finding orphaned resources:** `tse <region> cleanup` force-deletes everything with these tags.
+**Finding orphaned resources:** `tse <region> cleanup` force-deletes everything with exit node tags.
 
 ### VPC Lifecycle (Important!)
 
@@ -111,13 +128,13 @@ var friendlyToAWS = map[string]string{
 }
 ```
 
-Both Lambda and CLI use the same mapping. Rebuild both after changes.
+Both Lambda and CLI use the same mapping. Rebuild CLI after changes.
 
 ### Tailscale Integration
 
-The Lambda requires `TAILSCALE_AUTH_KEY` environment variable (configured in OpenTofu).
+The Lambda requires `TAILSCALE_AUTH_KEY` environment variable (set during deployment).
 
-Auth key requirements (created in Tailscale admin console):
+Auth key requirements (created via `tse setup` or manually in Tailscale admin console):
 - ✅ Reusable
 - ✅ Ephemeral (instances auto-removed when terminated)
 - ✅ Tagged with `tag:exitnode`
@@ -139,7 +156,7 @@ Tailscale ACL must include:
 
 ### Tailscale API Integration
 
-The `tse setup` command will automate Tailscale configuration using the Tailscale API:
+The `tse setup` command automates Tailscale configuration using the Tailscale API:
 
 **API Endpoints:**
 - `GET /api/v2/tailnet/{tailnet}/acl` - Retrieve current ACL policy (includes ETag)
@@ -159,7 +176,7 @@ The `tse setup` command will automate Tailscale configuration using the Tailscal
 - Only adds `tag:exitnode` to `tagOwners` if not already present
 - Only adds exit node auto-approval if not already configured
 - Creates auth key with: reusable=true, ephemeral=true, tags=["tag:exitnode"], preauthorized=true
-- Stores auth key in 1Password (optional) or displays for manual storage
+- Displays auth key for user to save in `.env` file
 - Uses ETag-based collision avoidance when updating ACL (If-Match header)
 - Validates ACL changes before applying
 
@@ -176,7 +193,7 @@ Check `TSE_LAMBDA_URL` is set and points to Function URL (not API Gateway).
 
 ### Exit Node Doesn't Appear in Tailscale
 1. Check ACL has `tag:exitnode` in tagOwners and autoApprovers
-2. Check auth key has `tag:exitnode` (stored in 1Password or OpenTofu var)
+2. Check auth key has `tag:exitnode` (stored in `.env` as `TAILSCALE_AUTH_KEY`)
 3. Wait 60 seconds - instance needs time to install Tailscale
 
 ### VPC Won't Delete
@@ -201,13 +218,33 @@ go test ./lambda/aws -v
 ## Dependencies
 
 - `github.com/aws/aws-lambda-go`: Lambda runtime and event types
-- `github.com/aws/aws-sdk-go-v2`: AWS SDK for EC2 operations
+- `github.com/aws/aws-sdk-go-v2`: AWS SDK for EC2, IAM, Lambda, CloudWatch Logs
 - Go 1.23 (specified in `go.mod`)
 
-## OpenTofu/Terraform
+## Native Deployment Architecture
 
-Infrastructure code in `deployments/opentofu/`:
-- `main.tf`: Lambda function, IAM roles, Function URL
-- `variables.tf`: Configurable inputs (Tailscale auth key path)
-- `outputs.tf`: Lambda Function URL output
-- Uses 1Password CLI to fetch Tailscale auth key: `op://private/Tailscale/CurrentAuthKey`
+Infrastructure deployment is pure Go using AWS SDK v2:
+
+**Discovery** (`cmd/tse/infrastructure/discovery.go`):
+- Tag-based resource discovery (no local state)
+- Queries AWS for resources by name and validates tags
+- Returns InfrastructureState with what exists
+
+**Creation** (`cmd/tse/infrastructure/create.go`):
+- buildLambdaZip() - compiles Lambda for linux/arm64 in-memory
+- Creates: Log Group, IAM Role, Policies, Lambda Function, Function URL
+- Adds resource-based policy for Function URL public access
+
+**Deletion** (`cmd/tse/infrastructure/delete.go`):
+- Deletes resources in reverse dependency order
+- Policies must be removed before IAM role deletion
+
+**Setup** (`cmd/tse/infrastructure/setup.go`):
+- Orchestrates idempotent deployment
+- Handles IAM eventual consistency (10s wait)
+- Generates TSE_AUTH_TOKEN if not provided
+
+**Teardown** (`cmd/tse/infrastructure/teardown.go`):
+- Discovers and deletes all resources
+- Detects legacy resources (without ManagedBy tag)
+- Requires confirmation before deletion

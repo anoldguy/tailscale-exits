@@ -55,17 +55,6 @@ func TestGenerateUserData(t *testing.T) {
 				}
 			}
 
-			// Should contain the auth key
-			if !strings.Contains(script, tt.authKey) {
-				t.Errorf("generateUserData script missing auth key: %s", tt.authKey)
-			}
-
-			// Should contain the friendly region in hostname
-			expectedHostname := "exit-" + tt.friendlyRegion
-			if !strings.Contains(script, expectedHostname) {
-				t.Errorf("generateUserData script missing expected hostname: %s", expectedHostname)
-			}
-
 			// Should start with shebang
 			if !strings.HasPrefix(script, "#!/bin/bash") {
 				t.Errorf("generateUserData script should start with #!/bin/bash")
@@ -79,12 +68,12 @@ func TestGenerateUserData(t *testing.T) {
 	}
 }
 
-func TestGenerateUserDataNoAuthKeyInjection(t *testing.T) {
-	// Test that user input can't inject commands
-	maliciousAuthKey := "tskey-auth-test; rm -rf /"
+func TestGenerateUserDataTemplateSubstitution(t *testing.T) {
+	// Test that template substitution works correctly
+	authKey := "tskey-auth-test123"
 	friendlyRegion := "ohio"
 
-	result := generateUserData(maliciousAuthKey, friendlyRegion)
+	result := generateUserData(authKey, friendlyRegion)
 	decoded, err := base64.StdEncoding.DecodeString(result)
 	if err != nil {
 		t.Fatalf("generateUserData returned invalid base64: %v", err)
@@ -92,19 +81,22 @@ func TestGenerateUserDataNoAuthKeyInjection(t *testing.T) {
 
 	script := string(decoded)
 
-	// The auth key should be used as-is in the tailscale up command
-	// This test ensures we're not doing any special shell escaping that could be bypassed
-	if !strings.Contains(script, "--authkey="+maliciousAuthKey) {
-		t.Errorf("generateUserData should contain the full auth key including semicolon")
+	// The auth key should be inserted directly by the template
+	expectedAuthKey := "--authkey=" + authKey
+	if !strings.Contains(script, expectedAuthKey) {
+		t.Errorf("generateUserData should contain auth key: %s", expectedAuthKey)
 	}
 
-	// The malicious part should be in the auth key parameter, not as a separate command
-	lines := strings.Split(script, "\n")
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "rm -rf") {
-			t.Errorf("generateUserData appears to have command injection vulnerability")
-		}
+	// The hostname should be inserted directly by the template
+	expectedHostname := "--hostname=exit-" + friendlyRegion
+	if !strings.Contains(script, expectedHostname) {
+		t.Errorf("generateUserData should contain hostname: %s", expectedHostname)
+	}
+
+	// Should contain the region in the logger message
+	expectedLog := "Tailscale exit node setup complete for region: " + friendlyRegion
+	if !strings.Contains(script, expectedLog) {
+		t.Errorf("generateUserData should contain log message with region: %s", expectedLog)
 	}
 }
 

@@ -1,15 +1,3 @@
-# OpenTofu/Terraform state files (contain secrets!)
-*.tfstate
-*.tfstate.*
-**/*.tfstate
-**/*.tfstate.*
-*.tfplan
-terraform.tfvars
-
-# OpenTofu/Terraform directories
-**/.terraform
-**/.terraform.*
-
 # Build artifacts
 bin/
 lambda/bootstrap
@@ -23,9 +11,10 @@ lambda/bootstrap
 *.swo
 *~
 
+# Environment variables (contain secrets!)
+.env
+.envrc
+
 # OS files
 .DS_Store
 Thumbs.db
-
-# Keep lock file for reproducible builds
-!.terraform.lock.hcl
