@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/anoldguy/tse/cmd/tse/infrastructure"
+	"github.com/anoldguy/tse/cmd/tse/ui"
 )
 
 // runStatus displays the current state of TSE infrastructure.
@@ -12,7 +13,7 @@ func runStatus(args []string) error {
 	ctx := context.Background()
 	region := "us-east-2" // TODO: make configurable
 
-	fmt.Printf("Discovering TSE infrastructure in %s...\n\n", region)
+	fmt.Printf("%s %s...\n\n", ui.Info("Discovering TSE infrastructure in"), ui.Highlight(region))
 
 	state, err := infrastructure.AutodiscoverInfrastructure(ctx, region)
 	if err != nil {
@@ -20,14 +21,14 @@ func runStatus(args []string) error {
 	}
 
 	if !state.Exists() {
-		fmt.Println("No TSE infrastructure found")
-		fmt.Println("\nRun 'tse deploy' to create infrastructure")
+		fmt.Println(ui.Subtle("No TSE infrastructure found"))
+		fmt.Printf("\n%s Run 'tse deploy' to create infrastructure\n", ui.Info("→"))
 		return nil
 	}
 
 	// Print table header
-	fmt.Println("Resource                           Status    Details")
-	fmt.Println("-----------------------------------  --------  --------------------------------------------------")
+	fmt.Println(ui.Bold("Resource                           Status    Details"))
+	fmt.Println(ui.Subtle("-----------------------------------  --------  --------------------------------------------------"))
 
 	// CloudWatch Log Group
 	printResourceRow("CloudWatch Log Group", state.LogGroup != nil, func() string {
@@ -72,15 +73,17 @@ func runStatus(args []string) error {
 	// Print summary
 	fmt.Println()
 	if state.IsComplete() {
-		fmt.Println("✓ Infrastructure is complete")
+		fmt.Println(ui.Success("✓ Infrastructure is complete"))
 	} else {
 		missing := state.Missing()
-		fmt.Printf("✗ Infrastructure is incomplete (%d missing)\n", len(missing))
-		fmt.Println("\nMissing resources:")
+		fmt.Printf("%s Infrastructure is incomplete (%s missing)\n",
+			ui.Error("✗"),
+			ui.Bold(fmt.Sprintf("%d", len(missing))))
+		fmt.Println(ui.Bold("\nMissing resources:"))
 		for _, res := range missing {
-			fmt.Printf("  - %s\n", res)
+			fmt.Printf("  %s %s\n", ui.Error("-"), res)
 		}
-		fmt.Println("\nRun 'tse deploy' to create missing resources")
+		fmt.Printf("\n%s Run 'tse deploy' to create missing resources\n", ui.Info("→"))
 	}
 
 	return nil
@@ -88,12 +91,19 @@ func runStatus(args []string) error {
 
 // printResourceRow prints a single row in the status table.
 func printResourceRow(name string, exists bool, details string) {
-	status := "✓ Found"
-	if !exists {
-		status = "✗ Missing"
+	var status string
+	if exists {
+		status = ui.Success("✓ Found")
+	} else {
+		status = ui.Error("✗ Missing")
 		details = ""
 	}
 
-	// Pad name to 35 chars, status to 9 chars
-	fmt.Printf("%-35s  %-9s %s\n", name, status, details)
+	// Highlight important details (URLs, resource names)
+	if details != "" {
+		details = ui.Subtle(details)
+	}
+
+	// Pad name to 35 chars
+	fmt.Printf("%-35s  %s  %s\n", name, status, details)
 }

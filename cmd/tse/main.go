@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/anoldguy/tse/cmd/tse/ui"
 	"github.com/anoldguy/tse/shared/regions"
 	"github.com/anoldguy/tse/shared/types"
 )
@@ -68,7 +69,7 @@ func main() {
 	if command == "setup" {
 		err := runSetup(os.Args[2:])
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			fmt.Fprintf(os.Stderr, "%s %v\n", ui.Error("Error:"), err)
 			os.Exit(1)
 		}
 		return
@@ -82,7 +83,7 @@ func main() {
 		}
 		err := runStatus(os.Args[2:])
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			fmt.Fprintf(os.Stderr, "%s %v\n", ui.Error("Error:"), err)
 			os.Exit(1)
 		}
 		return
@@ -96,7 +97,7 @@ func main() {
 		}
 		err := runDeploy(os.Args[2:])
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			fmt.Fprintf(os.Stderr, "%s %v\n", ui.Error("Error:"), err)
 			os.Exit(1)
 		}
 		return
@@ -110,7 +111,7 @@ func main() {
 		}
 		err := runTeardown(os.Args[2:])
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			fmt.Fprintf(os.Stderr, "%s %v\n", ui.Error("Error:"), err)
 			os.Exit(1)
 		}
 		return
@@ -119,8 +120,8 @@ func main() {
 	// All other commands require TSE_LAMBDA_URL
 	lambdaURL := os.Getenv("TSE_LAMBDA_URL")
 	if lambdaURL == "" {
-		fmt.Fprintf(os.Stderr, "Error: TSE_LAMBDA_URL environment variable not set\n")
-		fmt.Fprintf(os.Stderr, "\nHint: First run 'tse setup' to configure Tailscale, then deploy the Lambda.\n")
+		fmt.Fprintf(os.Stderr, "%s TSE_LAMBDA_URL environment variable not set\n", ui.Error("Error:"))
+		fmt.Fprintf(os.Stderr, "\n%s First run 'tse setup' to configure Tailscale, then deploy the Lambda.\n", ui.Info("Hint:"))
 		os.Exit(1)
 	}
 
@@ -135,7 +136,7 @@ func main() {
 		}
 		err := handleHealth(lambdaURL)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			fmt.Fprintf(os.Stderr, "%s %v\n", ui.Error("Error:"), err)
 			os.Exit(1)
 		}
 		return
@@ -149,7 +150,7 @@ func main() {
 		}
 		err := handleShutdown(lambdaURL)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			fmt.Fprintf(os.Stderr, "%s %v\n", ui.Error("Error:"), err)
 			os.Exit(1)
 		}
 		return
@@ -166,7 +167,7 @@ func main() {
 
 	// Validate region
 	if !regions.IsValidFriendlyName(region) {
-		fmt.Fprintf(os.Stderr, "Error: Invalid region '%s'\n", region)
+		fmt.Fprintf(os.Stderr, "%s Invalid region %s\n", ui.Error("Error:"), ui.Highlight(region))
 		fmt.Fprintf(os.Stderr, "Available regions: %s\n", regions.GetAvailableRegions())
 		os.Exit(1)
 	}
@@ -176,29 +177,29 @@ func main() {
 	case "instances":
 		err := handleInstances(lambdaURL, region)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			fmt.Fprintf(os.Stderr, "%s %v\n", ui.Error("Error:"), err)
 			os.Exit(1)
 		}
 	case "start":
 		err := handleStart(lambdaURL, region)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			fmt.Fprintf(os.Stderr, "%s %v\n", ui.Error("Error:"), err)
 			os.Exit(1)
 		}
 	case "stop":
 		err := handleStop(lambdaURL, region)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			fmt.Fprintf(os.Stderr, "%s %v\n", ui.Error("Error:"), err)
 			os.Exit(1)
 		}
 	case "cleanup":
 		err := handleCleanup(lambdaURL, region)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			fmt.Fprintf(os.Stderr, "%s %v\n", ui.Error("Error:"), err)
 			os.Exit(1)
 		}
 	default:
-		fmt.Fprintf(os.Stderr, "Error: Invalid action '%s'\n", action)
+		fmt.Fprintf(os.Stderr, "%s Invalid action %s\n", ui.Error("Error:"), ui.Highlight(action))
 		fmt.Fprintf(os.Stderr, "Valid actions: instances, start, stop, cleanup\n")
 		os.Exit(1)
 	}
@@ -286,9 +287,9 @@ func handleHealth(lambdaURL string) error {
 		return fmt.Errorf("failed to parse health response: %w", err)
 	}
 
-	fmt.Printf("Status: %s\n", health.Status)
-	fmt.Printf("Version: %s\n", health.Version)
-	fmt.Printf("Timestamp: %s\n", health.Timestamp)
+	fmt.Printf("%s %s\n", ui.Label("Status:"), ui.Success(health.Status))
+	fmt.Printf("%s %s\n", ui.Label("Version:"), health.Version)
+	fmt.Printf("%s %s\n", ui.Label("Timestamp:"), ui.Subtle(health.Timestamp))
 
 	return nil
 }
@@ -315,23 +316,23 @@ func handleInstances(lambdaURL, region string) error {
 		return fmt.Errorf("failed to parse response: %w", err)
 	}
 
-	fmt.Printf("Instances in %s region: %d\n", region, instancesResp.Count)
+	fmt.Printf("Instances in %s region: %s\n", ui.Highlight(region), ui.Bold(fmt.Sprintf("%d", instancesResp.Count)))
 	if instancesResp.Count == 0 {
-		fmt.Println("No instances found.")
+		fmt.Println(ui.Subtle("No instances found."))
 		return nil
 	}
 
 	fmt.Println()
 	for _, instance := range instancesResp.Instances {
-		fmt.Printf("Instance ID: %s\n", instance.InstanceID)
-		fmt.Printf("  State: %s\n", instance.State)
-		fmt.Printf("  Type: %s\n", instance.InstanceType)
-		fmt.Printf("  Launch Time: %s\n", instance.LaunchTime.Format(time.RFC3339))
+		fmt.Printf("%s %s\n", ui.Label("Instance ID:"), ui.Highlight(instance.InstanceID))
+		fmt.Printf("  %s %s\n", ui.Label("State:"), ui.Success(instance.State))
+		fmt.Printf("  %s %s\n", ui.Label("Type:"), instance.InstanceType)
+		fmt.Printf("  %s %s\n", ui.Label("Launch Time:"), ui.Subtle(instance.LaunchTime.Format(time.RFC3339)))
 		if instance.PublicIP != "" {
-			fmt.Printf("  Public IP: %s\n", instance.PublicIP)
+			fmt.Printf("  %s %s\n", ui.Label("Public IP:"), ui.Highlight(instance.PublicIP))
 		}
 		if instance.TailscaleHostname != "" {
-			fmt.Printf("  Tailscale Hostname: %s\n", instance.TailscaleHostname)
+			fmt.Printf("  %s %s\n", ui.Label("Tailscale Hostname:"), ui.Highlight(instance.TailscaleHostname))
 		}
 		fmt.Println()
 	}
@@ -356,7 +357,7 @@ func handleStart(lambdaURL, region string) error {
 	if resp.StatusCode == http.StatusConflict {
 		var errorResp types.ErrorResponse
 		if json.Unmarshal(body, &errorResp) == nil {
-			fmt.Printf("Info: %s\n", errorResp.Error)
+			fmt.Printf("%s %s\n", ui.Info("Info:"), errorResp.Error)
 			return nil
 		}
 	}
@@ -370,13 +371,13 @@ func handleStart(lambdaURL, region string) error {
 		return fmt.Errorf("failed to parse response: %w", err)
 	}
 
-	fmt.Printf("✓ %s\n", startResp.Message)
+	fmt.Printf("%s %s\n", ui.Checkmark(), startResp.Message)
 	if startResp.Instance != nil {
-		fmt.Printf("Instance ID: %s\n", startResp.Instance.InstanceID)
-		fmt.Printf("Instance Type: %s\n", startResp.Instance.InstanceType)
-		fmt.Printf("Tailscale Hostname: %s\n", startResp.Instance.TailscaleHostname)
-		fmt.Printf("State: %s\n", startResp.Instance.State)
-		fmt.Println("\nNote: It may take 1-2 minutes for the exit node to become available in Tailscale.")
+		fmt.Printf("%s %s\n", ui.Label("Instance ID:"), ui.Highlight(startResp.Instance.InstanceID))
+		fmt.Printf("%s %s\n", ui.Label("Instance Type:"), startResp.Instance.InstanceType)
+		fmt.Printf("%s %s\n", ui.Label("Tailscale Hostname:"), ui.Highlight(startResp.Instance.TailscaleHostname))
+		fmt.Printf("%s %s\n", ui.Label("State:"), ui.Success(startResp.Instance.State))
+		fmt.Printf("\n%s It may take 1-2 minutes for the exit node to become available in Tailscale.\n", ui.Subtle("Note:"))
 	}
 
 	return nil
@@ -404,9 +405,9 @@ func handleStop(lambdaURL, region string) error {
 		return fmt.Errorf("failed to parse response: %w", err)
 	}
 
-	fmt.Printf("✓ %s\n", stopResp.Message)
+	fmt.Printf("%s %s\n", ui.Checkmark(), stopResp.Message)
 	if stopResp.TerminatedCount > 0 {
-		fmt.Printf("Terminated instances: %v\n", stopResp.TerminatedIDs)
+		fmt.Printf("%s %v\n", ui.Label("Terminated instances:"), stopResp.TerminatedIDs)
 	}
 
 	return nil
@@ -434,18 +435,18 @@ func handleCleanup(lambdaURL, region string) error {
 		return fmt.Errorf("failed to parse response: %w", err)
 	}
 
-	fmt.Printf("✓ %s\n", cleanupResp.Message)
+	fmt.Printf("%s %s\n", ui.Checkmark(), cleanupResp.Message)
 	if cleanupResp.TerminatedCount > 0 {
-		fmt.Printf("Cleaned up resources: %v\n", cleanupResp.TerminatedIDs)
+		fmt.Printf("%s %v\n", ui.Label("Cleaned up resources:"), cleanupResp.TerminatedIDs)
 	} else {
-		fmt.Println("No orphaned TSE resources found.")
+		fmt.Println(ui.Subtle("No orphaned TSE resources found."))
 	}
 
 	return nil
 }
 
 func handleShutdown(lambdaURL string) error {
-	fmt.Println("Stopping exit nodes in all regions...")
+	fmt.Println(ui.Title("Stopping exit nodes in all regions..."))
 	fmt.Println()
 
 	allRegions := regions.GetAllFriendlyNames()
@@ -456,14 +457,14 @@ func handleShutdown(lambdaURL string) error {
 		url := fmt.Sprintf("%s/%s/stop", lambdaURL, region)
 		resp, err := makeAuthenticatedRequest("POST", url, bytes.NewReader([]byte("{}")))
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to contact Lambda for %s: %v\n", region, err)
+			fmt.Fprintf(os.Stderr, "%s failed to contact Lambda for %s: %v\n", ui.Warning("Warning:"), region, err)
 			continue
 		}
 
 		body, err := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to read response for %s: %v\n", region, err)
+			fmt.Fprintf(os.Stderr, "%s failed to read response for %s: %v\n", ui.Warning("Warning:"), region, err)
 			continue
 		}
 
@@ -474,18 +475,21 @@ func handleShutdown(lambdaURL string) error {
 				continue
 			}
 			// Actual error - warn the user
-			fmt.Fprintf(os.Stderr, "Warning: stop failed for %s (HTTP %d): %s\n", region, resp.StatusCode, string(body))
+			fmt.Fprintf(os.Stderr, "%s stop failed for %s (HTTP %d): %s\n", ui.Warning("Warning:"), region, resp.StatusCode, string(body))
 			continue
 		}
 
 		var stopResp types.StopResponse
 		if err := json.Unmarshal(body, &stopResp); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to parse response for %s: %v\n", region, err)
+			fmt.Fprintf(os.Stderr, "%s failed to parse response for %s: %v\n", ui.Warning("Warning:"), region, err)
 			continue
 		}
 
 		if stopResp.TerminatedCount > 0 {
-			fmt.Printf("✓ %s: terminated %d instance(s)\n", region, stopResp.TerminatedCount)
+			fmt.Printf("%s %s: terminated %s instance(s)\n",
+				ui.Checkmark(),
+				ui.Highlight(region),
+				ui.Bold(fmt.Sprintf("%d", stopResp.TerminatedCount)))
 			totalTerminated += stopResp.TerminatedCount
 			regionsWithInstances = append(regionsWithInstances, region)
 		}
@@ -493,10 +497,13 @@ func handleShutdown(lambdaURL string) error {
 
 	fmt.Println()
 	if totalTerminated == 0 {
-		fmt.Println("No running exit nodes found in any region.")
+		fmt.Println(ui.Subtle("No running exit nodes found in any region."))
 	} else {
-		fmt.Printf("✓ Shutdown complete: terminated %d instance(s) across %d region(s)\n",
-			totalTerminated, len(regionsWithInstances))
+		fmt.Printf("%s %s terminated %s instance(s) across %s region(s)\n",
+			ui.Checkmark(),
+			ui.Success("Shutdown complete:"),
+			ui.Bold(fmt.Sprintf("%d", totalTerminated)),
+			ui.Bold(fmt.Sprintf("%d", len(regionsWithInstances))))
 	}
 
 	return nil
