@@ -267,26 +267,36 @@ func enhanceHTTPStatusError(statusCode int, body, operation string) error {
 }
 
 func handleHealth(lambdaURL string) error {
-	resp, err := makeAuthenticatedRequest("GET", lambdaURL, nil)
-	if err != nil {
-		return err // Already enhanced with context
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("failed to read response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return enhanceHTTPStatusError(resp.StatusCode, string(body), "health check")
-	}
-
 	var health types.HealthResponse
-	if err := json.Unmarshal(body, &health); err != nil {
-		return fmt.Errorf("failed to parse health response: %w", err)
+
+	err := ui.WithSpinner("Checking Lambda health", func() error {
+		resp, err := makeAuthenticatedRequest("GET", lambdaURL, nil)
+		if err != nil {
+			return err // Already enhanced with context
+		}
+		defer resp.Body.Close()
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return fmt.Errorf("failed to read response: %w", err)
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			return enhanceHTTPStatusError(resp.StatusCode, string(body), "health check")
+		}
+
+		if err := json.Unmarshal(body, &health); err != nil {
+			return fmt.Errorf("failed to parse health response: %w", err)
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return err
 	}
 
+	fmt.Println()
 	fmt.Printf("%s %s\n", ui.Label("Status:"), ui.Success(health.Status))
 	fmt.Printf("%s %s\n", ui.Label("Version:"), health.Version)
 	fmt.Printf("%s %s\n", ui.Label("Timestamp:"), ui.Subtle(health.Timestamp))
@@ -295,27 +305,37 @@ func handleHealth(lambdaURL string) error {
 }
 
 func handleInstances(lambdaURL, region string) error {
-	url := fmt.Sprintf("%s/%s/instances", lambdaURL, region)
-	resp, err := makeAuthenticatedRequest("GET", url, nil)
-	if err != nil {
-		return err // Already enhanced with context
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("failed to read response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return enhanceHTTPStatusError(resp.StatusCode, string(body), fmt.Sprintf("list instances in %s", region))
-	}
-
 	var instancesResp types.InstancesResponse
-	if err := json.Unmarshal(body, &instancesResp); err != nil {
-		return fmt.Errorf("failed to parse response: %w", err)
+
+	err := ui.WithSpinner(fmt.Sprintf("Listing instances in %s", region), func() error {
+		url := fmt.Sprintf("%s/%s/instances", lambdaURL, region)
+		resp, err := makeAuthenticatedRequest("GET", url, nil)
+		if err != nil {
+			return err // Already enhanced with context
+		}
+		defer resp.Body.Close()
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return fmt.Errorf("failed to read response: %w", err)
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			return enhanceHTTPStatusError(resp.StatusCode, string(body), fmt.Sprintf("list instances in %s", region))
+		}
+
+		if err := json.Unmarshal(body, &instancesResp); err != nil {
+			return fmt.Errorf("failed to parse response: %w", err)
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return err
 	}
 
+	fmt.Println()
 	fmt.Printf("Instances in %s region: %s\n", ui.Highlight(region), ui.Bold(fmt.Sprintf("%d", instancesResp.Count)))
 	if instancesResp.Count == 0 {
 		fmt.Println(ui.Subtle("No instances found."))
@@ -341,34 +361,51 @@ func handleInstances(lambdaURL, region string) error {
 }
 
 func handleStart(lambdaURL, region string) error {
-	url := fmt.Sprintf("%s/%s/start", lambdaURL, region)
-	resp, err := makeAuthenticatedRequest("POST", url, nil)
-	if err != nil {
-		return err // Already enhanced with context
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("failed to read response: %w", err)
-	}
-
-	// Handle 409 Conflict gracefully (instance already running)
-	if resp.StatusCode == http.StatusConflict {
-		var errorResp types.ErrorResponse
-		if json.Unmarshal(body, &errorResp) == nil {
-			fmt.Printf("%s %s\n", ui.Info("Info:"), errorResp.Error)
-			return nil
-		}
-	}
-
-	if resp.StatusCode != http.StatusCreated {
-		return enhanceHTTPStatusError(resp.StatusCode, string(body), fmt.Sprintf("start exit node in %s", region))
-	}
-
 	var startResp types.StartResponse
-	if err := json.Unmarshal(body, &startResp); err != nil {
-		return fmt.Errorf("failed to parse response: %w", err)
+	var alreadyRunning bool
+
+	err := ui.WithSpinner(fmt.Sprintf("Starting exit node in %s", region), func() error {
+		url := fmt.Sprintf("%s/%s/start", lambdaURL, region)
+		resp, err := makeAuthenticatedRequest("POST", url, nil)
+		if err != nil {
+			return err // Already enhanced with context
+		}
+		defer resp.Body.Close()
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return fmt.Errorf("failed to read response: %w", err)
+		}
+
+		// Handle 409 Conflict gracefully (instance already running)
+		if resp.StatusCode == http.StatusConflict {
+			var errorResp types.ErrorResponse
+			if json.Unmarshal(body, &errorResp) == nil {
+				alreadyRunning = true
+				startResp.Message = errorResp.Error
+				return nil
+			}
+		}
+
+		if resp.StatusCode != http.StatusCreated {
+			return enhanceHTTPStatusError(resp.StatusCode, string(body), fmt.Sprintf("start exit node in %s", region))
+		}
+
+		if err := json.Unmarshal(body, &startResp); err != nil {
+			return fmt.Errorf("failed to parse response: %w", err)
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return err
+	}
+
+	fmt.Println()
+	if alreadyRunning {
+		fmt.Printf("%s %s\n", ui.Info("Info:"), startResp.Message)
+		return nil
 	}
 
 	fmt.Printf("%s %s\n", ui.Checkmark(), startResp.Message)
@@ -384,27 +421,37 @@ func handleStart(lambdaURL, region string) error {
 }
 
 func handleStop(lambdaURL, region string) error {
-	url := fmt.Sprintf("%s/%s/stop", lambdaURL, region)
-	resp, err := makeAuthenticatedRequest("POST", url, bytes.NewReader([]byte("{}")))
-	if err != nil {
-		return err // Already enhanced with context
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("failed to read response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return enhanceHTTPStatusError(resp.StatusCode, string(body), fmt.Sprintf("stop exit node in %s", region))
-	}
-
 	var stopResp types.StopResponse
-	if err := json.Unmarshal(body, &stopResp); err != nil {
-		return fmt.Errorf("failed to parse response: %w", err)
+
+	err := ui.WithSpinner(fmt.Sprintf("Stopping exit nodes in %s", region), func() error {
+		url := fmt.Sprintf("%s/%s/stop", lambdaURL, region)
+		resp, err := makeAuthenticatedRequest("POST", url, bytes.NewReader([]byte("{}")))
+		if err != nil {
+			return err // Already enhanced with context
+		}
+		defer resp.Body.Close()
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return fmt.Errorf("failed to read response: %w", err)
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			return enhanceHTTPStatusError(resp.StatusCode, string(body), fmt.Sprintf("stop exit node in %s", region))
+		}
+
+		if err := json.Unmarshal(body, &stopResp); err != nil {
+			return fmt.Errorf("failed to parse response: %w", err)
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return err
 	}
 
+	fmt.Println()
 	fmt.Printf("%s %s\n", ui.Checkmark(), stopResp.Message)
 	if stopResp.TerminatedCount > 0 {
 		fmt.Printf("%s %v\n", ui.Label("Terminated instances:"), stopResp.TerminatedIDs)
@@ -414,27 +461,37 @@ func handleStop(lambdaURL, region string) error {
 }
 
 func handleCleanup(lambdaURL, region string) error {
-	url := fmt.Sprintf("%s/%s/cleanup", lambdaURL, region)
-	resp, err := makeAuthenticatedRequest("POST", url, bytes.NewReader([]byte("{}")))
-	if err != nil {
-		return err // Already enhanced with context
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return fmt.Errorf("failed to read response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		return enhanceHTTPStatusError(resp.StatusCode, string(body), fmt.Sprintf("cleanup resources in %s", region))
-	}
-
 	var cleanupResp types.StopResponse // Reuse stop response structure
-	if err := json.Unmarshal(body, &cleanupResp); err != nil {
-		return fmt.Errorf("failed to parse response: %w", err)
+
+	err := ui.WithSpinner(fmt.Sprintf("Cleaning up resources in %s", region), func() error {
+		url := fmt.Sprintf("%s/%s/cleanup", lambdaURL, region)
+		resp, err := makeAuthenticatedRequest("POST", url, bytes.NewReader([]byte("{}")))
+		if err != nil {
+			return err // Already enhanced with context
+		}
+		defer resp.Body.Close()
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			return fmt.Errorf("failed to read response: %w", err)
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			return enhanceHTTPStatusError(resp.StatusCode, string(body), fmt.Sprintf("cleanup resources in %s", region))
+		}
+
+		if err := json.Unmarshal(body, &cleanupResp); err != nil {
+			return fmt.Errorf("failed to parse response: %w", err)
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		return err
 	}
 
+	fmt.Println()
 	fmt.Printf("%s %s\n", ui.Checkmark(), cleanupResp.Message)
 	if cleanupResp.TerminatedCount > 0 {
 		fmt.Printf("%s %v\n", ui.Label("Cleaned up resources:"), cleanupResp.TerminatedIDs)
@@ -454,42 +511,50 @@ func handleShutdown(lambdaURL string) error {
 	regionsWithInstances := []string{}
 
 	for _, region := range allRegions {
-		url := fmt.Sprintf("%s/%s/stop", lambdaURL, region)
-		resp, err := makeAuthenticatedRequest("POST", url, bytes.NewReader([]byte("{}")))
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "%s failed to contact Lambda for %s: %v\n", ui.Warning("Warning:"), region, err)
-			continue
-		}
-
-		body, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "%s failed to read response for %s: %v\n", ui.Warning("Warning:"), region, err)
-			continue
-		}
-
-		if resp.StatusCode != http.StatusOK {
-			// Check if it's a 404 (no instances found) vs actual error
-			if resp.StatusCode == http.StatusNotFound {
-				// No instances in this region, which is expected - continue silently
-				continue
-			}
-			// Actual error - warn the user
-			fmt.Fprintf(os.Stderr, "%s stop failed for %s (HTTP %d): %s\n", ui.Warning("Warning:"), region, resp.StatusCode, string(body))
-			continue
-		}
-
 		var stopResp types.StopResponse
-		if err := json.Unmarshal(body, &stopResp); err != nil {
-			fmt.Fprintf(os.Stderr, "%s failed to parse response for %s: %v\n", ui.Warning("Warning:"), region, err)
+		var noInstances bool
+
+		err := ui.WithSpinner(fmt.Sprintf("Checking %s", region), func() error {
+			url := fmt.Sprintf("%s/%s/stop", lambdaURL, region)
+			resp, err := makeAuthenticatedRequest("POST", url, bytes.NewReader([]byte("{}")))
+			if err != nil {
+				return fmt.Errorf("failed to contact Lambda: %w", err)
+			}
+
+			body, err := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if err != nil {
+				return fmt.Errorf("failed to read response: %w", err)
+			}
+
+			if resp.StatusCode != http.StatusOK {
+				// Check if it's a 404 (no instances found) vs actual error
+				if resp.StatusCode == http.StatusNotFound {
+					// No instances in this region, which is expected
+					noInstances = true
+					return nil
+				}
+				// Actual error
+				return fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+			}
+
+			if err := json.Unmarshal(body, &stopResp); err != nil {
+				return fmt.Errorf("failed to parse response: %w", err)
+			}
+
+			return nil
+		})
+
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "%s %s: %v\n", ui.Warning("Warning:"), region, err)
+			continue
+		}
+
+		if noInstances {
 			continue
 		}
 
 		if stopResp.TerminatedCount > 0 {
-			fmt.Printf("%s %s: terminated %s instance(s)\n",
-				ui.Checkmark(),
-				ui.Highlight(region),
-				ui.Bold(fmt.Sprintf("%d", stopResp.TerminatedCount)))
 			totalTerminated += stopResp.TerminatedCount
 			regionsWithInstances = append(regionsWithInstances, region)
 		}

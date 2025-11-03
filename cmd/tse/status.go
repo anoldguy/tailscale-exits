@@ -13,12 +13,16 @@ func runStatus(args []string) error {
 	ctx := context.Background()
 	region := "us-east-2" // TODO: make configurable
 
-	fmt.Printf("%s %s...\n\n", ui.Info("Discovering TSE infrastructure in"), ui.Highlight(region))
-
-	state, err := infrastructure.AutodiscoverInfrastructure(ctx, region)
+	var state *infrastructure.InfrastructureState
+	err := ui.WithSpinner("Discovering infrastructure in us-east-2", func() error {
+		var err error
+		state, err = infrastructure.AutodiscoverInfrastructure(ctx, region)
+		return err
+	})
 	if err != nil {
 		return fmt.Errorf("discovery failed: %w", err)
 	}
+	fmt.Println()
 
 	if !state.Exists() {
 		fmt.Println(ui.Subtle("No TSE infrastructure found"))

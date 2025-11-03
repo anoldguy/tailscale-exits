@@ -41,7 +41,6 @@ func buildLambdaZip() ([]byte, error) {
 	bootstrapPath := filepath.Join(tmpDir, "bootstrap")
 
 	// Compile the Lambda function for linux/arm64
-	fmt.Println("  Compiling Lambda function for linux/arm64...")
 	cmd := exec.Command("go", "build", "-o", bootstrapPath, ".")
 	cmd.Dir = lambdaDir
 	cmd.Env = append(os.Environ(),
@@ -56,7 +55,6 @@ func buildLambdaZip() ([]byte, error) {
 	}
 
 	// Create zip file in memory
-	fmt.Println("  Creating deployment package...")
 	var buf bytes.Buffer
 	zipWriter := zip.NewWriter(&buf)
 
@@ -80,14 +78,12 @@ func buildLambdaZip() ([]byte, error) {
 		return nil, fmt.Errorf("failed to close zip writer: %w", err)
 	}
 
-	fmt.Printf("  Deployment package created (%d bytes)\n", buf.Len())
 	return buf.Bytes(), nil
 }
 
 // createLogGroup creates a CloudWatch log group with the specified retention.
 func createLogGroup(ctx context.Context, clients *AWSClients, functionName string, retentionDays int) error {
 	logGroupName := fmt.Sprintf("/aws/lambda/%s", functionName)
-	fmt.Printf("  Creating CloudWatch log group: %s\n", logGroupName)
 
 	// Create log group
 	_, err := clients.Logs.CreateLogGroup(ctx, &cloudwatchlogs.CreateLogGroupInput{
@@ -107,7 +103,6 @@ func createLogGroup(ctx context.Context, clients *AWSClients, functionName strin
 		return fmt.Errorf("failed to set log retention: %w", err)
 	}
 
-	fmt.Println("  ✓ Log group created")
 	return nil
 }
 
@@ -128,8 +123,6 @@ func createIAMRole(ctx context.Context, clients *AWSClients, roleName string) (s
 		]
 	}`
 
-	fmt.Printf("  Creating IAM role: %s\n", roleName)
-
 	// Convert tags to IAM tag format
 	iamTags := []iamtypes.Tag{}
 	for k, v := range standardTags() {
@@ -148,14 +141,11 @@ func createIAMRole(ctx context.Context, clients *AWSClients, roleName string) (s
 		return "", fmt.Errorf("failed to create IAM role: %w", err)
 	}
 
-	fmt.Println("  ✓ IAM role created")
 	return *result.Role.Arn, nil
 }
 
 // attachManagedPolicy attaches the AWSLambdaBasicExecutionRole managed policy to the role.
 func attachManagedPolicy(ctx context.Context, clients *AWSClients, roleName string) error {
-	fmt.Println("  Attaching managed policy: AWSLambdaBasicExecutionRole")
-
 	_, err := clients.IAM.AttachRolePolicy(ctx, &iam.AttachRolePolicyInput{
 		RoleName:  aws.String(roleName),
 		PolicyArn: aws.String(ManagedPolicyARN),
@@ -164,7 +154,6 @@ func attachManagedPolicy(ctx context.Context, clients *AWSClients, roleName stri
 		return fmt.Errorf("failed to attach managed policy: %w", err)
 	}
 
-	fmt.Println("  ✓ Managed policy attached")
 	return nil
 }
 
@@ -224,8 +213,6 @@ func createInlinePolicy(ctx context.Context, clients *AWSClients, roleName strin
 		]
 	}`
 
-	fmt.Printf("  Creating inline policy: %s\n", InlinePolicyName)
-
 	_, err := clients.IAM.PutRolePolicy(ctx, &iam.PutRolePolicyInput{
 		RoleName:       aws.String(roleName),
 		PolicyName:     aws.String(InlinePolicyName),
@@ -235,15 +222,12 @@ func createInlinePolicy(ctx context.Context, clients *AWSClients, roleName strin
 		return fmt.Errorf("failed to create inline policy: %w", err)
 	}
 
-	fmt.Println("  ✓ Inline policy created")
 	return nil
 }
 
 // createLambdaFunction creates the Lambda function with the provided configuration.
 // Returns the function ARN.
 func createLambdaFunction(ctx context.Context, clients *AWSClients, functionName string, roleARN string, zipBytes []byte, tailscaleAuthKey string, tseAuthToken string) (string, error) {
-	fmt.Printf("  Creating Lambda function: %s\n", functionName)
-
 	// Convert tags to Lambda tag format
 	lambdaTags := standardTags()
 
@@ -270,15 +254,12 @@ func createLambdaFunction(ctx context.Context, clients *AWSClients, functionName
 		return "", fmt.Errorf("failed to create Lambda function: %w", err)
 	}
 
-	fmt.Println("  ✓ Lambda function created")
 	return *result.FunctionArn, nil
 }
 
 // createFunctionURL creates a Lambda function URL with CORS configuration.
 // Returns the function URL.
 func createFunctionURL(ctx context.Context, clients *AWSClients, functionName string) (string, error) {
-	fmt.Printf("  Creating function URL for: %s\n", functionName)
-
 	result, err := clients.Lambda.CreateFunctionUrlConfig(ctx, &lambda.CreateFunctionUrlConfigInput{
 		FunctionName: aws.String(functionName),
 		AuthType:     lambdatypes.FunctionUrlAuthTypeNone,
@@ -297,7 +278,6 @@ func createFunctionURL(ctx context.Context, clients *AWSClients, functionName st
 
 	// Add resource-based policy to allow public invocation via Function URL
 	// This is required when AuthType is NONE
-	fmt.Println("  Adding public invocation permission...")
 	_, err = clients.Lambda.AddPermission(ctx, &lambda.AddPermissionInput{
 		FunctionName:        aws.String(functionName),
 		StatementId:         aws.String("FunctionURLAllowPublicAccess"),
@@ -309,6 +289,5 @@ func createFunctionURL(ctx context.Context, clients *AWSClients, functionName st
 		return "", fmt.Errorf("failed to add function URL permission: %w", err)
 	}
 
-	fmt.Println("  ✓ Function URL created")
 	return *result.FunctionUrl, nil
 }
