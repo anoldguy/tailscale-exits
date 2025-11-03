@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/anoldguy/tse/cmd/tse/ui"
 	"github.com/anoldguy/tse/shared/tailscale"
 )
 
@@ -76,8 +77,8 @@ To create an API token:
 Note: You must be an Owner or Admin on your Tailscale network.`)
 	}
 
-	fmt.Println("TSE Setup - Configuring Tailscale for ephemeral exit nodes")
-	fmt.Println("============================================================")
+	fmt.Println(ui.Title("TSE Setup - Configuring Tailscale for ephemeral exit nodes"))
+	fmt.Println(ui.Subtle("============================================================"))
 	fmt.Println()
 
 	// Create Tailscale client
@@ -153,13 +154,13 @@ Example: tse setup --tailnet yourname@github`)
 
 	// Success summary
 	fmt.Println()
-	fmt.Println("Setup complete! 🎉")
+	fmt.Println(ui.Success("Setup complete! 🎉"))
 	fmt.Println()
-	fmt.Println("Next steps:")
-	fmt.Println("1. Add TAILSCALE_AUTH_KEY to your .env file (shown above)")
-	fmt.Println("2. Deploy Lambda: ./bin/tse deploy")
-	fmt.Println("3. Save TSE_AUTH_TOKEN and TSE_LAMBDA_URL from deploy output to .env")
-	fmt.Println("4. Test: ./bin/tse ohio start")
+	fmt.Println(ui.Bold("Next steps:"))
+	fmt.Println(ui.Info("1. Add TAILSCALE_AUTH_KEY to your .env file (shown above)"))
+	fmt.Println(ui.Info("2. Deploy Lambda: ./bin/tse deploy"))
+	fmt.Println(ui.Info("3. Save TSE_AUTH_TOKEN and TSE_LAMBDA_URL from deploy output to .env"))
+	fmt.Println(ui.Info("4. Test: ./bin/tse ohio start"))
 	fmt.Println()
 
 	return nil
@@ -314,14 +315,20 @@ Create a new token at: https://login.tailscale.com/admin/settings/keys`)
 }
 
 func displayAuthKey(authKey string) error {
-	fmt.Println("Step 3/3: Save your auth key")
+	fmt.Println(ui.Bold("Step 3/3: Save your auth key"))
 	fmt.Println()
-	fmt.Println("Your Tailscale auth key:")
-	fmt.Println(authKey)
-	fmt.Println()
-	fmt.Println("Add this to your .env file:")
-	fmt.Printf("  TAILSCALE_AUTH_KEY=%s\n", authKey)
-	fmt.Println()
-	fmt.Println("Then you can deploy with: tse deploy")
+
+	// Display auth key in highlight box
+	content := []string{
+		"⚠️  Save this auth key - you'll need it for deployment!",
+		"",
+		"Add to your .env file:",
+		"",
+		fmt.Sprintf("TAILSCALE_AUTH_KEY=%s", authKey),
+		"",
+		"Then deploy with: tse deploy",
+	}
+	fmt.Println(ui.HighlightBox("Your Tailscale Auth Key", content...))
+
 	return nil
 }

@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/anoldguy/tse/cmd/tse/infrastructure"
+	"github.com/anoldguy/tse/cmd/tse/ui"
 )
 
 // runTeardown tears down all TSE infrastructure after confirmation.
@@ -18,17 +19,23 @@ func runTeardown(args []string) error {
 	fmt.Printf("Region: %s\n", region)
 	fmt.Println()
 
-	// Show warning
-	fmt.Println("⚠️  WARNING: This will permanently delete all TSE infrastructure!")
-	fmt.Println()
-	fmt.Println("This includes:")
-	fmt.Println("  - Lambda function and function URL")
-	fmt.Println("  - IAM role and policies")
-	fmt.Println("  - CloudWatch log groups")
-	fmt.Println()
+	// Show DANGER box
+	items := []string{
+		"Lambda function and function URL",
+		"IAM role and policies",
+		"CloudWatch log groups",
+		"ALL exit node instances and VPCs",
+	}
 
-	// Require explicit confirmation
-	fmt.Print("Type 'yes' to confirm deletion: ")
+	dangerBox := ui.DangerBox(
+		"DANGER - PERMANENT DELETION",
+		items,
+		"Type 'DELETE' to confirm (anything else cancels):",
+	)
+
+	fmt.Println(dangerBox)
+	fmt.Println()
+	fmt.Print("→ ")
 
 	reader := bufio.NewReader(os.Stdin)
 	response, err := reader.ReadString('\n')
@@ -37,9 +44,9 @@ func runTeardown(args []string) error {
 	}
 
 	response = strings.TrimSpace(response)
-	if response != "yes" {
+	if response != "DELETE" {
 		fmt.Println()
-		fmt.Println("Teardown cancelled")
+		fmt.Println(ui.Success("✓ Teardown cancelled - nothing was deleted"))
 		return nil
 	}
 

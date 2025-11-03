@@ -8,7 +8,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
+	"github.com/anoldguy/tse/cmd/tse/ui"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs"
 	"github.com/aws/aws-sdk-go-v2/service/iam"
@@ -16,6 +18,21 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/lambda"
 	lambdatypes "github.com/aws/aws-sdk-go-v2/service/lambda/types"
 )
+
+// iamPropagationMessages are the rotating snarky messages shown during IAM propagation wait.
+var iamPropagationMessages = []string{
+	"Waiting for IAM to propagate (retrying Lambda creation)",
+	"AWS is eventually consistent... eventually",
+	"Waiting for IAM to propagate across all AWS regions and dimensions",
+	"This saves you $10/month vs a commercial VPN",
+	"IAM propagation: like waiting for DNS, but for permissions",
+	"Fun fact: IAM consistency is why Terraform has trust issues",
+	"Distributed systems are great, they said. It'll be fun, they said",
+	"Somewhere, an AWS engineer is muttering 'it's fine, it's eventual'",
+	"Still cheaper than NordVPN though",
+	"This is the part where we pretend 10 seconds is science, not vibes",
+	"IAM propagation: the buffering icon of cloud infrastructure",
+}
 
 // standardTags returns the standard tag for TSE resources.
 func standardTags() map[string]string {
@@ -41,7 +58,6 @@ func buildLambdaZip() ([]byte, error) {
 	bootstrapPath := filepath.Join(tmpDir, "bootstrap")
 
 	// Compile the Lambda function for linux/arm64
-	fmt.Println("  Compiling Lambda function for linux/arm64...")
 	cmd := exec.Command("go", "build", "-o", bootstrapPath, ".")
 	cmd.Dir = lambdaDir
 	cmd.Env = append(os.Environ(),
@@ -56,7 +72,6 @@ func buildLambdaZip() ([]byte, error) {
 	}
 
 	// Create zip file in memory
-	fmt.Println("  Creating deployment package...")
 	var buf bytes.Buffer
 	zipWriter := zip.NewWriter(&buf)
 
@@ -80,14 +95,12 @@ func buildLambdaZip() ([]byte, error) {
 		return nil, fmt.Errorf("failed to close zip writer: %w", err)
 	}
 
-	fmt.Printf("  Deployment package created (%d bytes)\n", buf.Len())
 	return buf.Bytes(), nil
 }
 
 // createLogGroup creates a CloudWatch log group with the specified retention.
 func createLogGroup(ctx context.Context, clients *AWSClients, functionName string, retentionDays int) error {
 	logGroupName := fmt.Sprintf("/aws/lambda/%s", functionName)
-	fmt.Printf("  Creating CloudWatch log group: %s\n", logGroupName)
 
 	// Create log group
 	_, err := clients.Logs.CreateLogGroup(ctx, &cloudwatchlogs.CreateLogGroupInput{
@@ -107,7 +120,6 @@ func createLogGroup(ctx context.Context, clients *AWSClients, functionName strin
 		return fmt.Errorf("failed to set log retention: %w", err)
 	}
 
-	fmt.Println("  ✓ Log group created")
 	return nil
 }
 
@@ -128,8 +140,6 @@ func createIAMRole(ctx context.Context, clients *AWSClients, roleName string) (s
 		]
 	}`
 
-	fmt.Printf("  Creating IAM role: %s\n", roleName)
-
 	// Convert tags to IAM tag format
 	iamTags := []iamtypes.Tag{}
 	for k, v := range standardTags() {
@@ -148,14 +158,11 @@ func createIAMRole(ctx context.Context, clients *AWSClients, roleName string) (s
 		return "", fmt.Errorf("failed to create IAM role: %w", err)
 	}
 
-	fmt.Println("  ✓ IAM role created")
 	return *result.Role.Arn, nil
 }
 
 // attachManagedPolicy attaches the AWSLambdaBasicExecutionRole managed policy to the role.
 func attachManagedPolicy(ctx context.Context, clients *AWSClients, roleName string) error {
-	fmt.Println("  Attaching managed policy: AWSLambdaBasicExecutionRole")
-
 	_, err := clients.IAM.AttachRolePolicy(ctx, &iam.AttachRolePolicyInput{
 		RoleName:  aws.String(roleName),
 		PolicyArn: aws.String(ManagedPolicyARN),
@@ -164,7 +171,6 @@ func attachManagedPolicy(ctx context.Context, clients *AWSClients, roleName stri
 		return fmt.Errorf("failed to attach managed policy: %w", err)
 	}
 
-	fmt.Println("  ✓ Managed policy attached")
 	return nil
 }
 
@@ -224,8 +230,6 @@ func createInlinePolicy(ctx context.Context, clients *AWSClients, roleName strin
 		]
 	}`
 
-	fmt.Printf("  Creating inline policy: %s\n", InlinePolicyName)
-
 	_, err := clients.IAM.PutRolePolicy(ctx, &iam.PutRolePolicyInput{
 		RoleName:       aws.String(roleName),
 		PolicyName:     aws.String(InlinePolicyName),
@@ -235,15 +239,12 @@ func createInlinePolicy(ctx context.Context, clients *AWSClients, roleName strin
 		return fmt.Errorf("failed to create inline policy: %w", err)
 	}
 
-	fmt.Println("  ✓ Inline policy created")
 	return nil
 }
 
 // createLambdaFunction creates the Lambda function with the provided configuration.
 // Returns the function ARN.
 func createLambdaFunction(ctx context.Context, clients *AWSClients, functionName string, roleARN string, zipBytes []byte, tailscaleAuthKey string, tseAuthToken string) (string, error) {
-	fmt.Printf("  Creating Lambda function: %s\n", functionName)
-
 	// Convert tags to Lambda tag format
 	lambdaTags := standardTags()
 
@@ -270,15 +271,81 @@ func createLambdaFunction(ctx context.Context, clients *AWSClients, functionName
 		return "", fmt.Errorf("failed to create Lambda function: %w", err)
 	}
 
-	fmt.Println("  ✓ Lambda function created")
 	return *result.FunctionArn, nil
+}
+
+// isIAMPropagationError checks if an error is due to IAM eventual consistency.
+// Returns true if the error indicates the role cannot be assumed yet.
+func isIAMPropagationError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errMsg := err.Error()
+	// Check for InvalidParameterValueException with "cannot be assumed" message
+	return strings.Contains(errMsg, "InvalidParameterValueException") &&
+		strings.Contains(errMsg, "cannot be assumed")
+}
+
+// createLambdaFunctionWithRetry creates the Lambda function, retrying on IAM propagation errors.
+// Shows rotating snarky messages if we hit propagation delays.
+// Handles its own UI - starts with regular spinner, switches to rotating messages if needed.
+// Returns the function ARN.
+func createLambdaFunctionWithRetry(ctx context.Context, clients *AWSClients, functionName string, roleARN string, zipBytes []byte, tailscaleAuthKey string, tseAuthToken string) (string, error) {
+	// Try immediately with a regular spinner
+	var arn string
+	err := ui.WithSpinner("Creating Lambda function", func() error {
+		var err error
+		arn, err = createLambdaFunction(ctx, clients, functionName, roleARN, zipBytes, tailscaleAuthKey, tseAuthToken)
+		return err
+	})
+
+	if err == nil {
+		// Success on first try!
+		return arn, nil
+	}
+
+	// Check if it's an IAM propagation error
+	if !isIAMPropagationError(err) {
+		// Real error, fail immediately (spinner already showed X)
+		return "", err
+	}
+
+	// IAM propagation error - show rotating messages and retry
+	var finalARN string
+	var finalErr error
+
+	retryErr := ui.WithRotatingMessages(iamPropagationMessages, func() error {
+		arn, err := createLambdaFunction(ctx, clients, functionName, roleARN, zipBytes, tailscaleAuthKey, tseAuthToken)
+		if err == nil {
+			finalARN = arn
+			return nil
+		}
+
+		// Still failing - check if it's still propagation or a different error
+		if isIAMPropagationError(err) {
+			// Keep retrying
+			return fmt.Errorf("still waiting")
+		}
+
+		// Different error, stop retrying
+		finalErr = err
+		return nil
+	})
+
+	if retryErr != nil {
+		return "", retryErr // Timeout
+	}
+
+	if finalErr != nil {
+		return "", finalErr // Real error encountered during retry
+	}
+
+	return finalARN, nil
 }
 
 // createFunctionURL creates a Lambda function URL with CORS configuration.
 // Returns the function URL.
 func createFunctionURL(ctx context.Context, clients *AWSClients, functionName string) (string, error) {
-	fmt.Printf("  Creating function URL for: %s\n", functionName)
-
 	result, err := clients.Lambda.CreateFunctionUrlConfig(ctx, &lambda.CreateFunctionUrlConfigInput{
 		FunctionName: aws.String(functionName),
 		AuthType:     lambdatypes.FunctionUrlAuthTypeNone,
@@ -297,7 +364,6 @@ func createFunctionURL(ctx context.Context, clients *AWSClients, functionName st
 
 	// Add resource-based policy to allow public invocation via Function URL
 	// This is required when AuthType is NONE
-	fmt.Println("  Adding public invocation permission...")
 	_, err = clients.Lambda.AddPermission(ctx, &lambda.AddPermissionInput{
 		FunctionName:        aws.String(functionName),
 		StatementId:         aws.String("FunctionURLAllowPublicAccess"),
@@ -309,6 +375,5 @@ func createFunctionURL(ctx context.Context, clients *AWSClients, functionName st
 		return "", fmt.Errorf("failed to add function URL permission: %w", err)
 	}
 
-	fmt.Println("  ✓ Function URL created")
 	return *result.FunctionUrl, nil
 }

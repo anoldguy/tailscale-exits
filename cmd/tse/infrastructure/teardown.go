@@ -3,19 +3,24 @@ package infrastructure
 import (
 	"context"
 	"fmt"
+
+	"github.com/anoldguy/tse/cmd/tse/ui"
 )
 
 // Teardown removes all TSE infrastructure in reverse dependency order.
 // Returns error only on critical failures; logs warnings for individual resource failures.
 func Teardown(ctx context.Context, region string) error {
-	fmt.Println("Discovering TSE infrastructure to teardown...")
-	fmt.Println()
-
 	// 1. Discover what exists
-	state, err := AutodiscoverInfrastructure(ctx, region)
+	var state *InfrastructureState
+	err := ui.WithSpinner("Discovering infrastructure to teardown", func() error {
+		var err error
+		state, err = AutodiscoverInfrastructure(ctx, region)
+		return err
+	})
 	if err != nil {
 		return fmt.Errorf("failed to discover infrastructure: %w", err)
 	}
+	fmt.Println()
 
 	if !state.Exists() {
 		fmt.Println("No TSE infrastructure found")
@@ -53,9 +58,6 @@ func Teardown(ctx context.Context, region string) error {
 	}
 	fmt.Println()
 
-	fmt.Println("Tearing down infrastructure...")
-	fmt.Println()
-
 	// 4. Create AWS clients once
 	clients, err := NewAWSClients(ctx, region)
 	if err != nil {
@@ -66,49 +68,56 @@ func Teardown(ctx context.Context, region string) error {
 	// Order: Function URL → Lambda → Inline Policy → Managed Policy → IAM Role → Log Group
 
 	if state.FunctionURL != "" && state.Lambda != nil {
-		if err := deleteFunctionURL(ctx, clients, state.Lambda.Name); err != nil {
+		if err := ui.WithSpinner("Deleting function URL", func() error {
+			return deleteFunctionURL(ctx, clients, state.Lambda.Name)
+		}); err != nil {
 			fmt.Printf("⚠️  Warning: %v\n", err)
 		}
-		fmt.Println()
 	}
 
 	if state.Lambda != nil {
-		if err := deleteLambdaFunction(ctx, clients, state.Lambda.Name); err != nil {
+		if err := ui.WithSpinner("Deleting Lambda function", func() error {
+			return deleteLambdaFunction(ctx, clients, state.Lambda.Name)
+		}); err != nil {
 			fmt.Printf("⚠️  Warning: %v\n", err)
 		}
-		fmt.Println()
 	}
 
 	// CRITICAL: Must delete/detach policies before deleting role
 	if state.Policies.InlineName != "" && state.IAMRole != nil {
-		if err := deleteInlinePolicy(ctx, clients, state.IAMRole.Name, state.Policies.InlineName); err != nil {
+		if err := ui.WithSpinner("Deleting inline policy", func() error {
+			return deleteInlinePolicy(ctx, clients, state.IAMRole.Name, state.Policies.InlineName)
+		}); err != nil {
 			fmt.Printf("⚠️  Warning: %v\n", err)
 		}
-		fmt.Println()
 	}
 
 	if state.Policies.Managed && state.IAMRole != nil {
-		if err := detachManagedPolicy(ctx, clients, state.IAMRole.Name, ManagedPolicyARN); err != nil {
+		if err := ui.WithSpinner("Detaching managed policy", func() error {
+			return detachManagedPolicy(ctx, clients, state.IAMRole.Name, ManagedPolicyARN)
+		}); err != nil {
 			fmt.Printf("⚠️  Warning: %v\n", err)
 		}
-		fmt.Println()
 	}
 
 	if state.IAMRole != nil {
-		if err := deleteIAMRole(ctx, clients, state.IAMRole.Name); err != nil {
+		if err := ui.WithSpinner("Deleting IAM role", func() error {
+			return deleteIAMRole(ctx, clients, state.IAMRole.Name)
+		}); err != nil {
 			fmt.Printf("⚠️  Warning: %v\n", err)
 		}
-		fmt.Println()
 	}
 
 	if state.LogGroup != nil {
-		if err := deleteLogGroup(ctx, clients, state.LogGroup.Name); err != nil {
+		if err := ui.WithSpinner("Deleting CloudWatch log group", func() error {
+			return deleteLogGroup(ctx, clients, state.LogGroup.Name)
+		}); err != nil {
 			fmt.Printf("⚠️  Warning: %v\n", err)
 		}
-		fmt.Println()
 	}
 
-	fmt.Println("✓ Teardown complete!")
+	fmt.Println()
+	fmt.Println(ui.Success("✓ Teardown complete!"))
 	if isLegacy {
 		fmt.Println()
 		fmt.Println("  Legacy infrastructure has been removed.")

@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os"
 	"time"
+
+	"github.com/anoldguy/tse/cmd/tse/ui"
 )
 
 // SetupResult contains the deployment result including secrets.
@@ -19,11 +21,16 @@ type SetupResult struct {
 // Setup orchestrates the idempotent deployment of TSE infrastructure.
 // Creates only missing resources and returns the final state.
 func Setup(ctx context.Context, region string) (*SetupResult, error) {
-	fmt.Println("Deploying TSE infrastructure...")
+	fmt.Println(ui.Title("Deploying TSE infrastructure"))
 	fmt.Println()
 
 	// 1. Discover existing state
-	state, err := AutodiscoverInfrastructure(ctx, region)
+	var state *InfrastructureState
+	err := ui.WithSpinner("Discovering existing infrastructure", func() error {
+		var err error
+		state, err = AutodiscoverInfrastructure(ctx, region)
+		return err
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to discover infrastructure: %w", err)
 	}
@@ -69,79 +76,85 @@ func Setup(ctx context.Context, region string) (*SetupResult, error) {
 
 	// 4. Create CloudWatch Log Group (if missing)
 	if state.LogGroup == nil {
-		if err := createLogGroup(ctx, clients, FunctionName, 14); err != nil {
+		if err := ui.WithSpinner("Creating CloudWatch log group", func() error {
+			return createLogGroup(ctx, clients, FunctionName, 14)
+		}); err != nil {
 			return nil, err
 		}
-		fmt.Println()
 	}
 
 	// 5. Create IAM Role (if missing)
 	var roleARN string
 	if state.IAMRole == nil {
-		roleARN, err = createIAMRole(ctx, clients, RoleName)
-		if err != nil {
+		if err := ui.WithSpinner("Creating IAM execution role", func() error {
+			var err error
+			roleARN, err = createIAMRole(ctx, clients, RoleName)
+			return err
+		}); err != nil {
 			return nil, err
 		}
-		fmt.Println()
 	} else {
 		roleARN = state.IAMRole.ARN
 	}
 
 	// 6. Attach policies (if missing)
 	if !state.Policies.Managed {
-		if err := attachManagedPolicy(ctx, clients, RoleName); err != nil {
+		if err := ui.WithSpinner("Attaching managed execution policy", func() error {
+			return attachManagedPolicy(ctx, clients, RoleName)
+		}); err != nil {
 			return nil, err
 		}
-		fmt.Println()
 	}
 
 	if state.Policies.InlineName == "" {
-		if err := createInlinePolicy(ctx, clients, RoleName); err != nil {
+		if err := ui.WithSpinner("Creating inline EC2/VPC policy", func() error {
+			return createInlinePolicy(ctx, clients, RoleName)
+		}); err != nil {
 			return nil, err
 		}
-		fmt.Println()
 	}
 
-	// 7. Wait for IAM eventual consistency if we created role or policies
-	if state.IAMRole == nil || !state.Policies.Managed || state.Policies.InlineName == "" {
-		fmt.Println("Waiting 10 seconds for IAM propagation...")
-		time.Sleep(10 * time.Second)
-		fmt.Println()
-	}
-
-	// 8. Create Lambda Function (if missing)
+	// 7. Create Lambda Function (if missing)
+	// Note: This will automatically retry with snarky messages if we hit IAM propagation delays
 	if state.Lambda == nil {
 		// Build Lambda
-		zipBytes, err := buildLambdaZip()
-		if err != nil {
+		var zipBytes []byte
+		if err := ui.WithSpinner("Building Lambda function (linux/arm64)", func() error {
+			var err error
+			zipBytes, err = buildLambdaZip()
+			return err
+		}); err != nil {
 			return nil, err
 		}
-		fmt.Println()
 
-		// Create function
-		_, err = createLambdaFunction(ctx, clients, FunctionName, roleARN, zipBytes, tailscaleAuthKey, tseAuthToken)
-		if err != nil {
+		// Create function (handles its own UI - spinner for normal case, rotating messages for IAM delays)
+		if _, err := createLambdaFunctionWithRetry(ctx, clients, FunctionName, roleARN, zipBytes, tailscaleAuthKey, tseAuthToken); err != nil {
 			return nil, err
 		}
-		fmt.Println()
 	}
 
-	// 9. Create Function URL (if missing)
+	// 8. Create Function URL (if missing)
 	if state.FunctionURL == "" {
-		_, err := createFunctionURL(ctx, clients, FunctionName)
-		if err != nil {
+		if err := ui.WithSpinner("Creating public function URL", func() error {
+			_, err := createFunctionURL(ctx, clients, FunctionName)
+			return err
+		}); err != nil {
 			return nil, err
 		}
-		fmt.Println()
 	}
 
-	// 10. Re-discover to get final state
-	finalState, err := AutodiscoverInfrastructure(ctx, region)
-	if err != nil {
+	// 9. Re-discover to get final state
+	var finalState *InfrastructureState
+	if err := ui.WithSpinner("Verifying deployment", func() error {
+		var err error
+		finalState, err = AutodiscoverInfrastructure(ctx, region)
+		return err
+	}); err != nil {
 		return nil, fmt.Errorf("failed to verify deployment: %w", err)
 	}
 
-	fmt.Println("✓ Infrastructure deployment complete!")
+	fmt.Println()
+	fmt.Println(ui.Success("✓ Infrastructure deployment complete!"))
 	fmt.Println()
 
 	return &SetupResult{
