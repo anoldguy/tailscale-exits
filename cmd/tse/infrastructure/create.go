@@ -8,7 +8,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 
+	"github.com/anoldguy/tse/cmd/tse/ui"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs"
 	"github.com/aws/aws-sdk-go-v2/service/iam"
@@ -16,6 +18,21 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/lambda"
 	lambdatypes "github.com/aws/aws-sdk-go-v2/service/lambda/types"
 )
+
+// iamPropagationMessages are the rotating snarky messages shown during IAM propagation wait.
+var iamPropagationMessages = []string{
+	"Waiting for IAM to propagate (retrying Lambda creation)",
+	"AWS is eventually consistent... eventually",
+	"Waiting for IAM to propagate across all AWS regions and dimensions",
+	"This saves you $10/month vs a commercial VPN",
+	"IAM propagation: like waiting for DNS, but for permissions",
+	"Fun fact: IAM consistency is why Terraform has trust issues",
+	"Distributed systems are great, they said. It'll be fun, they said",
+	"Somewhere, an AWS engineer is muttering 'it's fine, it's eventual'",
+	"Still cheaper than NordVPN though",
+	"This is the part where we pretend 10 seconds is science, not vibes",
+	"IAM propagation: the buffering icon of cloud infrastructure",
+}
 
 // standardTags returns the standard tag for TSE resources.
 func standardTags() map[string]string {
@@ -255,6 +272,75 @@ func createLambdaFunction(ctx context.Context, clients *AWSClients, functionName
 	}
 
 	return *result.FunctionArn, nil
+}
+
+// isIAMPropagationError checks if an error is due to IAM eventual consistency.
+// Returns true if the error indicates the role cannot be assumed yet.
+func isIAMPropagationError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errMsg := err.Error()
+	// Check for InvalidParameterValueException with "cannot be assumed" message
+	return strings.Contains(errMsg, "InvalidParameterValueException") &&
+		strings.Contains(errMsg, "cannot be assumed")
+}
+
+// createLambdaFunctionWithRetry creates the Lambda function, retrying on IAM propagation errors.
+// Shows rotating snarky messages if we hit propagation delays.
+// Handles its own UI - starts with regular spinner, switches to rotating messages if needed.
+// Returns the function ARN.
+func createLambdaFunctionWithRetry(ctx context.Context, clients *AWSClients, functionName string, roleARN string, zipBytes []byte, tailscaleAuthKey string, tseAuthToken string) (string, error) {
+	// Try immediately with a regular spinner
+	var arn string
+	err := ui.WithSpinner("Creating Lambda function", func() error {
+		var err error
+		arn, err = createLambdaFunction(ctx, clients, functionName, roleARN, zipBytes, tailscaleAuthKey, tseAuthToken)
+		return err
+	})
+
+	if err == nil {
+		// Success on first try!
+		return arn, nil
+	}
+
+	// Check if it's an IAM propagation error
+	if !isIAMPropagationError(err) {
+		// Real error, fail immediately (spinner already showed X)
+		return "", err
+	}
+
+	// IAM propagation error - show rotating messages and retry
+	var finalARN string
+	var finalErr error
+
+	retryErr := ui.WithRotatingMessages(iamPropagationMessages, func() error {
+		arn, err := createLambdaFunction(ctx, clients, functionName, roleARN, zipBytes, tailscaleAuthKey, tseAuthToken)
+		if err == nil {
+			finalARN = arn
+			return nil
+		}
+
+		// Still failing - check if it's still propagation or a different error
+		if isIAMPropagationError(err) {
+			// Keep retrying
+			return fmt.Errorf("still waiting")
+		}
+
+		// Different error, stop retrying
+		finalErr = err
+		return nil
+	})
+
+	if retryErr != nil {
+		return "", retryErr // Timeout
+	}
+
+	if finalErr != nil {
+		return "", finalErr // Real error encountered during retry
+	}
+
+	return finalARN, nil
 }
 
 // createFunctionURL creates a Lambda function URL with CORS configuration.

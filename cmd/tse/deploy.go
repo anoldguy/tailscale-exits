@@ -46,43 +46,54 @@ Then run 'tse deploy' again.`)
 
 	state := result.State
 
-	// Show deployment summary
-	fmt.Println(ui.Title("Deployment Summary"))
-	fmt.Println(ui.Subtle("-------------------"))
+	// Build success box content conditionally
+	successContent := []string{"✨ Your TSE infrastructure is ready!", ""}
 
 	if state.FunctionURL != "" {
-		fmt.Printf("%s %s\n", ui.Label("Function URL:"), ui.Highlight(state.FunctionURL))
-	}
-
-	if state.IAMRole != nil {
-		fmt.Printf("%s %s\n", ui.Label("IAM Role ARN:"), ui.Subtle(state.IAMRole.ARN))
+		successContent = append(successContent, fmt.Sprintf("Function URL:  %s", state.FunctionURL))
 	}
 
 	if state.Lambda != nil {
-		fmt.Printf("%s %s\n", ui.Label("Lambda ARN:"), ui.Subtle(state.Lambda.ARN))
+		successContent = append(successContent, fmt.Sprintf("Lambda ARN:    %s", state.Lambda.ARN))
 	}
 
-	// Show auth token (always, whether generated or existing)
-	fmt.Println()
-	if result.WasGenerated {
-		fmt.Println(ui.Warning("⚠️  IMPORTANT: New auth token generated!"))
-		fmt.Println(ui.Warning("Save this token - you won't see it again:"))
-	} else {
-		fmt.Println(ui.Info("Auth token (from environment):"))
+	if state.IAMRole != nil {
+		successContent = append(successContent, fmt.Sprintf("IAM Role:      %s", state.IAMRole.Name))
 	}
-	fmt.Printf("  export TSE_AUTH_TOKEN=%s\n", ui.Highlight(result.AuthToken))
 
+	successContent = append(successContent, "", "Next: Start an exit node with 'tse ohio start'")
+
+	fmt.Println(ui.SuccessBox("Deployment Complete", successContent...))
 	fmt.Println()
-	fmt.Println(ui.Subheader("Export these to use the CLI:"))
+
+	// Show critical export commands in highlight box (only if we have the URL)
 	if state.FunctionURL != "" {
-		fmt.Printf("  export TSE_LAMBDA_URL=%s\n", ui.Highlight(state.FunctionURL))
-	}
-	fmt.Printf("  export TSE_AUTH_TOKEN=%s\n", ui.Highlight(result.AuthToken))
+		exportTitle := "Copy These Exports"
+		if result.WasGenerated {
+			exportTitle = "⚠️  SAVE THIS - New Auth Token Generated!"
+		}
 
+		exportContent := []string{
+			"Add these to your shell or .env file:",
+			"",
+			fmt.Sprintf("export TSE_LAMBDA_URL=%s", state.FunctionURL),
+			fmt.Sprintf("export TSE_AUTH_TOKEN=%s", result.AuthToken),
+		}
+		fmt.Println(ui.HighlightBox(exportTitle, exportContent...))
+	} else {
+		// Deployment incomplete - just show auth token
+		fmt.Println(ui.Warning("⚠️  Deployment incomplete - some resources failed to create"))
+		fmt.Println()
+		if result.WasGenerated {
+			fmt.Printf("Generated auth token (save this): %s\n", ui.Highlight(result.AuthToken))
+		}
+	}
 	fmt.Println()
+
+	// Next steps
 	fmt.Println(ui.Subheader("Next steps:"))
-	fmt.Println(ui.Info("  1. Add the exports above to your .env file"))
-	fmt.Println(ui.Info("  2. Run: tse health"))
+	fmt.Println(ui.Info("  1. Export the variables above"))
+	fmt.Println(ui.Info("  2. Test connectivity: tse health"))
 	fmt.Println(ui.Info("  3. Start an exit node: tse ohio start"))
 
 	return nil

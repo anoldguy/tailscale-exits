@@ -297,9 +297,14 @@ func handleHealth(lambdaURL string) error {
 	}
 
 	fmt.Println()
-	fmt.Printf("%s %s\n", ui.Label("Status:"), ui.Success(health.Status))
-	fmt.Printf("%s %s\n", ui.Label("Version:"), health.Version)
-	fmt.Printf("%s %s\n", ui.Label("Timestamp:"), ui.Subtle(health.Timestamp))
+
+	// Show health details in success box
+	content := []string{
+		fmt.Sprintf("Status      ✓ %s", health.Status),
+		fmt.Sprintf("Version     %s", health.Version),
+		fmt.Sprintf("Timestamp   %s", health.Timestamp),
+	}
+	fmt.Println(ui.SuccessBox("Lambda Health", content...))
 
 	return nil
 }
@@ -344,16 +349,24 @@ func handleInstances(lambdaURL, region string) error {
 
 	fmt.Println()
 	for _, instance := range instancesResp.Instances {
-		fmt.Printf("%s %s\n", ui.Label("Instance ID:"), ui.Highlight(instance.InstanceID))
-		fmt.Printf("  %s %s\n", ui.Label("State:"), ui.Success(instance.State))
-		fmt.Printf("  %s %s\n", ui.Label("Type:"), instance.InstanceType)
-		fmt.Printf("  %s %s\n", ui.Label("Launch Time:"), ui.Subtle(instance.LaunchTime.Format(time.RFC3339)))
+		// Build instance details content
+		content := []string{
+			fmt.Sprintf("Instance    %s", instance.InstanceID),
+			fmt.Sprintf("Type        %s", instance.InstanceType),
+			fmt.Sprintf("State       %s", instance.State),
+			fmt.Sprintf("Launch Time %s", instance.LaunchTime.Format("2006-01-02 15:04 MST")),
+		}
+
 		if instance.PublicIP != "" {
-			fmt.Printf("  %s %s\n", ui.Label("Public IP:"), ui.Highlight(instance.PublicIP))
+			content = append(content, fmt.Sprintf("Public IP   %s", instance.PublicIP))
 		}
+
 		if instance.TailscaleHostname != "" {
-			fmt.Printf("  %s %s\n", ui.Label("Tailscale Hostname:"), ui.Highlight(instance.TailscaleHostname))
+			content = append(content, fmt.Sprintf("Hostname    %s", instance.TailscaleHostname))
 		}
+
+		// Use info box for each instance
+		fmt.Println(ui.InfoBox("Exit Node Details", content...))
 		fmt.Println()
 	}
 

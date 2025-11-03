@@ -114,17 +114,8 @@ func Setup(ctx context.Context, region string) (*SetupResult, error) {
 		}
 	}
 
-	// 7. Wait for IAM eventual consistency if we created role or policies
-	if state.IAMRole == nil || !state.Policies.Managed || state.Policies.InlineName == "" {
-		if err := ui.WithSpinner("Waiting for IAM propagation (10s)", func() error {
-			time.Sleep(10 * time.Second)
-			return nil
-		}); err != nil {
-			return nil, err
-		}
-	}
-
-	// 8. Create Lambda Function (if missing)
+	// 7. Create Lambda Function (if missing)
+	// Note: This will automatically retry with snarky messages if we hit IAM propagation delays
 	if state.Lambda == nil {
 		// Build Lambda
 		var zipBytes []byte
@@ -136,16 +127,13 @@ func Setup(ctx context.Context, region string) (*SetupResult, error) {
 			return nil, err
 		}
 
-		// Create function
-		if err := ui.WithSpinner("Creating Lambda function", func() error {
-			_, err := createLambdaFunction(ctx, clients, FunctionName, roleARN, zipBytes, tailscaleAuthKey, tseAuthToken)
-			return err
-		}); err != nil {
+		// Create function (handles its own UI - spinner for normal case, rotating messages for IAM delays)
+		if _, err := createLambdaFunctionWithRetry(ctx, clients, FunctionName, roleARN, zipBytes, tailscaleAuthKey, tseAuthToken); err != nil {
 			return nil, err
 		}
 	}
 
-	// 9. Create Function URL (if missing)
+	// 8. Create Function URL (if missing)
 	if state.FunctionURL == "" {
 		if err := ui.WithSpinner("Creating public function URL", func() error {
 			_, err := createFunctionURL(ctx, clients, FunctionName)
@@ -155,7 +143,7 @@ func Setup(ctx context.Context, region string) (*SetupResult, error) {
 		}
 	}
 
-	// 10. Re-discover to get final state
+	// 9. Re-discover to get final state
 	var finalState *InfrastructureState
 	if err := ui.WithSpinner("Verifying deployment", func() error {
 		var err error

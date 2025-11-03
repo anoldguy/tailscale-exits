@@ -317,12 +317,18 @@ Create a new token at: https://login.tailscale.com/admin/settings/keys`)
 func displayAuthKey(authKey string) error {
 	fmt.Println(ui.Bold("Step 3/3: Save your auth key"))
 	fmt.Println()
-	fmt.Println(ui.Bold("Your Tailscale auth key:"))
-	fmt.Println(ui.Highlight(authKey))
-	fmt.Println()
-	fmt.Println(ui.Bold("Add this to your .env file:"))
-	fmt.Printf("  TAILSCALE_AUTH_KEY=%s\n", ui.Highlight(authKey))
-	fmt.Println()
-	fmt.Println(ui.Info("Then you can deploy with: tse deploy"))
+
+	// Display auth key in highlight box
+	content := []string{
+		"⚠️  Save this auth key - you'll need it for deployment!",
+		"",
+		"Add to your .env file:",
+		"",
+		fmt.Sprintf("TAILSCALE_AUTH_KEY=%s", authKey),
+		"",
+		"Then deploy with: tse deploy",
+	}
+	fmt.Println(ui.HighlightBox("Your Tailscale Auth Key", content...))
+
 	return nil
 }
