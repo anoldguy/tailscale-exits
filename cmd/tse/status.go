@@ -30,12 +30,11 @@ func runStatus(args []string) error {
 		return nil
 	}
 
-	// Print table header
-	fmt.Println(ui.Bold("Resource                           Status    Details"))
-	fmt.Println(ui.Subtle("-----------------------------------  --------  --------------------------------------------------"))
+	// Build table
+	table := ui.NewTable("Resource", "Status", "Details")
 
 	// CloudWatch Log Group
-	printResourceRow("CloudWatch Log Group", state.LogGroup != nil, func() string {
+	addResourceRow(table, "CloudWatch Log Group", state.LogGroup != nil, func() string {
 		if state.LogGroup != nil {
 			return state.LogGroup.Name
 		}
@@ -43,7 +42,7 @@ func runStatus(args []string) error {
 	}())
 
 	// IAM Role
-	printResourceRow("IAM Role", state.IAMRole != nil, func() string {
+	addResourceRow(table, "IAM Role", state.IAMRole != nil, func() string {
 		if state.IAMRole != nil {
 			return state.IAMRole.Name
 		}
@@ -51,7 +50,7 @@ func runStatus(args []string) error {
 	}())
 
 	// Managed Policy Attachment
-	printResourceRow("Managed Policy Attachment", state.Policies.Managed, func() string {
+	addResourceRow(table, "Managed Policy Attachment", state.Policies.Managed, func() string {
 		if state.Policies.Managed {
 			return "AWSLambdaBasicExecutionRole"
 		}
@@ -59,12 +58,10 @@ func runStatus(args []string) error {
 	}())
 
 	// Inline Policy
-	printResourceRow("Inline Policy", state.Policies.InlineName != "", func() string {
-		return state.Policies.InlineName
-	}())
+	addResourceRow(table, "Inline Policy", state.Policies.InlineName != "", state.Policies.InlineName)
 
 	// Lambda Function
-	printResourceRow("Lambda Function", state.Lambda != nil, func() string {
+	addResourceRow(table, "Lambda Function", state.Lambda != nil, func() string {
 		if state.Lambda != nil {
 			return state.Lambda.Name
 		}
@@ -72,7 +69,10 @@ func runStatus(args []string) error {
 	}())
 
 	// Function URL
-	printResourceRow("Function URL", state.FunctionURL != "", state.FunctionURL)
+	addResourceRow(table, "Function URL", state.FunctionURL != "", state.FunctionURL)
+
+	// Render table
+	fmt.Println(table.Render())
 
 	// Print summary
 	fmt.Println()
@@ -93,8 +93,8 @@ func runStatus(args []string) error {
 	return nil
 }
 
-// printResourceRow prints a single row in the status table.
-func printResourceRow(name string, exists bool, details string) {
+// addResourceRow adds a resource row to the table with proper styling
+func addResourceRow(table *ui.Table, name string, exists bool, details string) {
 	var status string
 	if exists {
 		status = ui.Success("✓ Found")
@@ -108,6 +108,5 @@ func printResourceRow(name string, exists bool, details string) {
 		details = ui.Subtle(details)
 	}
 
-	// Pad name to 35 chars
-	fmt.Printf("%-35s  %s  %s\n", name, status, details)
+	table.AddRow(name, status, details)
 }
