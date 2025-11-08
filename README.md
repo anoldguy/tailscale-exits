@@ -55,6 +55,79 @@ tailscale status  # Should show your devices
 aws sts get-caller-identity  # Should show your AWS account
 ```
 
+#### AWS Setup Details
+
+**Don't have AWS CLI installed?**
+- macOS: `brew install awscli`
+- Linux: `curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" && unzip awscliv2.zip && sudo ./aws/install`
+- Windows: Download from [AWS CLI installer](https://aws.amazon.com/cli/)
+
+**Configuring AWS credentials:**
+1. AWS Console → IAM → Users → Create an IAM user
+2. Security credentials → Create access key (save these somewhere, AWS won't show them again)
+3. Run `aws configure` and paste in:
+   - Access Key ID
+   - Secret Access Key
+   - Default region (e.g., `us-east-2`) - **This is where TSE infrastructure deploys**
+   - Output format (just hit enter, `json` is fine)
+
+**About that region setting:**
+TSE infrastructure (Lambda, IAM role, CloudWatch logs) deploys to whatever region you set as default. Exit nodes can still launch in **any** region - that's the whole point. The Lambda control plane could be in Ohio while you're routing through Tokyo. Your default region comes from `aws configure` or the `AWS_REGION` environment variable.
+
+**IAM permissions (the annoying part):**
+You need permissions to create Lambda functions, IAM roles, and CloudWatch logs. If you own the AWS account, just use `AdministratorAccess` and move on with your life.
+
+If you're paranoid about giving yourself admin access or just like making things harder than necessary, create a custom IAM policy with this:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "iam:CreateRole",
+        "iam:DeleteRole",
+        "iam:GetRole",
+        "iam:AttachRolePolicy",
+        "iam:DetachRolePolicy",
+        "iam:PutRolePolicy",
+        "iam:DeleteRolePolicy",
+        "iam:GetRolePolicy",
+        "iam:ListAttachedRolePolicies"
+      ],
+      "Resource": "arn:aws:iam::*:role/tailscale-exits-lambda-role"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "lambda:CreateFunction",
+        "lambda:DeleteFunction",
+        "lambda:GetFunction",
+        "lambda:UpdateFunctionConfiguration",
+        "lambda:CreateFunctionUrlConfig",
+        "lambda:DeleteFunctionUrlConfig",
+        "lambda:GetFunctionUrlConfig",
+        "lambda:AddPermission"
+      ],
+      "Resource": "arn:aws:lambda:*:*:function:tailscale-exits"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "logs:CreateLogGroup",
+        "logs:DeleteLogGroup",
+        "logs:DescribeLogGroups",
+        "logs:PutRetentionPolicy"
+      ],
+      "Resource": "arn:aws:logs:*:*:log-group:/aws/lambda/tailscale-exits*"
+    }
+  ]
+}
+```
+
+Yes, this is annoying. Welcome to AWS IAM, where everything is a policy document and the permissions are made up.
+
 ### Step 1: Configure Tailscale (5 minutes)
 
 **1.1 Create a Tailscale API token:**

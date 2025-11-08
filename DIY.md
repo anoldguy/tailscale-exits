@@ -160,6 +160,16 @@ echo "TAILSCALE_AUTH_KEY=$AUTH_KEY" >> .env
 
 Deploy everything using raw AWS CLI commands. No compiled tools needed.
 
+**Prerequisites for this part:**
+- AWS CLI installed (`brew install awscli` on macOS, [installer](https://aws.amazon.com/cli/) on Windows/Linux)
+- AWS credentials configured (`aws configure` with your access key ID and secret)
+- Default region set (whatever you choose becomes your Lambda control plane location)
+- IAM permissions to create Lambda functions, IAM roles, and CloudWatch logs (see below)
+
+**About AWS region:** These commands will deploy to your default region (from `aws configure` or `AWS_REGION` env var). The Lambda control plane lives there, but exit nodes can still launch in any region.
+
+**IAM permissions you need:** If you're the AWS account owner, you probably already have these. If not, you need permissions for IAM (CreateRole, PutRolePolicy, etc.), Lambda (CreateFunction, CreateFunctionUrlConfig, etc.), and CloudWatch Logs (CreateLogGroup, PutRetentionPolicy). See README.md "Required IAM permissions" section for the full policy if you really want to lock this down.
+
 ### Step 1: Build the Lambda Function
 
 ```bash
@@ -643,6 +653,9 @@ A: Yes, but it only creates resources in YOUR AWS account. An attacker could spi
 
 **Q: Can I use this without the Go CLI tool at all?**
 A: Absolutely! That's the point of this guide. Use curl, integrate into your shell scripts, whatever.
+
+**Q: What region does the Lambda control plane deploy to?**
+A: Your default AWS region (from `aws configure` or `AWS_REGION` env var). The Lambda, IAM role, and CloudWatch logs all live there. Exit nodes can still launch in any region - the control plane location doesn't affect where your traffic routes. If you want to change the Lambda region, either update your default in `~/.aws/config` or set `AWS_REGION` before running `tse deploy`.
 
 **Q: How do I add more regions?**
 A: Edit `shared/regions/regions.go`, add your region mapping, rebuild Lambda and CLI. No other changes needed.

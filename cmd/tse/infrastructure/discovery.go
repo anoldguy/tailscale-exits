@@ -33,6 +33,22 @@ type AWSClients struct {
 	Logs   *cloudwatchlogs.Client
 }
 
+// GetDefaultRegion returns the default AWS region from the user's configuration.
+// It checks (in order): AWS_REGION, AWS_DEFAULT_REGION, and ~/.aws/config.
+// Returns an error if no region is configured.
+func GetDefaultRegion(ctx context.Context) (string, error) {
+	cfg, err := config.LoadDefaultConfig(ctx)
+	if err != nil {
+		return "", fmt.Errorf("failed to load AWS config: %w", err)
+	}
+
+	if cfg.Region == "" {
+		return "", fmt.Errorf("no AWS region configured - set AWS_REGION or run 'aws configure'")
+	}
+
+	return cfg.Region, nil
+}
+
 // NewAWSClients creates AWS service clients for the given region.
 // IAM client uses the region but IAM is a global service.
 func NewAWSClients(ctx context.Context, region string) (*AWSClients, error) {
