@@ -90,6 +90,15 @@ shared/
 - Tag-based resource discovery
 - Creates 6 resources: Log Group, IAM Role, 2 Policies, Lambda Function, Function URL
 
+**Region Behavior:**
+- TSE infrastructure (Lambda, IAM role, CloudWatch logs) deploys to the user's default AWS region
+- Default region determined by (in order):
+  1. `AWS_REGION` environment variable
+  2. `AWS_DEFAULT_REGION` environment variable
+  3. `~/.aws/config` default region
+- Exit nodes can launch in **any AWS region** regardless of where control plane is deployed
+- Infrastructure code uses `GetDefaultRegion()` helper to load region from AWS config
+
 **Tagging Strategy for Infrastructure:**
 All managed infrastructure resources tagged with:
 - `ManagedBy=tse`
@@ -201,6 +210,15 @@ Instances still terminating. Wait 60 seconds and run `tse <region> cleanup`.
 
 ### "Region not found" Error
 Add region to `shared/regions/regions.go` and rebuild CLI + Lambda.
+
+### "No AWS region configured" Error
+User hasn't set up AWS CLI properly. They need to either:
+- Run `aws configure` and set a default region
+- Set `AWS_REGION` environment variable
+- Ensure `~/.aws/config` has a region configured
+
+### Deployment Fails with IAM Permission Errors
+The deploying IAM user needs specific permissions. See README.md "Required IAM permissions" section for the minimal policy. Quick fix: use `AdministratorAccess` managed policy (if account owner).
 
 ## Testing
 

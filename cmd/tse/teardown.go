@@ -14,7 +14,12 @@ import (
 // runTeardown tears down all TSE infrastructure after confirmation.
 func runTeardown(args []string) error {
 	ctx := context.Background()
-	region := "us-east-2" // TODO: make configurable
+
+	// Get default AWS region from user's configuration
+	region, err := infrastructure.GetDefaultRegion(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to determine AWS region: %w", err)
+	}
 
 	fmt.Printf("Region: %s\n", region)
 	fmt.Println()

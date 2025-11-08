@@ -60,3 +60,12 @@ func (s *InfrastructureState) Missing() []string {
 	}
 	return missing
 }
+
+// HasOnlyIAMResources returns true if only IAM resources exist (role/policies)
+// but no regional resources (Lambda, logs).
+// This indicates the user might be checking the wrong region.
+func (s *InfrastructureState) HasOnlyIAMResources() bool {
+	hasIAM := s.IAMRole != nil || s.Policies.Managed || s.Policies.InlineName != ""
+	hasRegional := s.LogGroup != nil || s.Lambda != nil || s.FunctionURL != ""
+	return hasIAM && !hasRegional
+}

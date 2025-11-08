@@ -11,10 +11,15 @@ import (
 // runStatus displays the current state of TSE infrastructure.
 func runStatus(args []string) error {
 	ctx := context.Background()
-	region := "us-east-2" // TODO: make configurable
+
+	// Get default AWS region from user's configuration
+	region, err := infrastructure.GetDefaultRegion(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to determine AWS region: %w", err)
+	}
 
 	var state *infrastructure.InfrastructureState
-	err := ui.WithSpinner("Discovering infrastructure in us-east-2", func() error {
+	err = ui.WithSpinner(fmt.Sprintf("Discovering infrastructure in %s", region), func() error {
 		var err error
 		state, err = infrastructure.AutodiscoverInfrastructure(ctx, region)
 		return err
@@ -87,6 +92,21 @@ func runStatus(args []string) error {
 		for _, res := range missing {
 			fmt.Printf("  %s %s\n", ui.Error("-"), res)
 		}
+
+		// Check for IAM-only resources (wrong region indicator)
+		if state.HasOnlyIAMResources() {
+			fmt.Println()
+			fmt.Println(ui.Warning("⚠️  Found IAM resources but no Lambda/logs"))
+			fmt.Println(ui.Subtle("   IAM is global, but Lambda and CloudWatch are regional."))
+			fmt.Println(ui.Subtle("   You might have infrastructure in a different region."))
+			fmt.Println()
+			fmt.Printf("%s Check your AWS region: %s\n", ui.Info("→"), ui.Highlight(region))
+			fmt.Printf("%s Change region: %s or %s\n",
+				ui.Info("→"),
+				ui.Subtle("aws configure"),
+				ui.Subtle("export AWS_REGION=us-east-2"))
+		}
+
 		fmt.Printf("\n%s Run 'tse deploy' to create missing resources\n", ui.Info("→"))
 	}
 

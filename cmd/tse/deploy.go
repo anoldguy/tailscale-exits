@@ -34,7 +34,12 @@ Then run 'tse deploy' again.`)
 	}
 
 	ctx := context.Background()
-	region := "us-east-2" // TODO: make configurable via flag or env var
+
+	// Get default AWS region from user's configuration
+	region, err := infrastructure.GetDefaultRegion(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to determine AWS region: %w", err)
+	}
 
 	fmt.Printf("%s %s\n", ui.Label("Region:"), ui.Highlight(region))
 	fmt.Println()
