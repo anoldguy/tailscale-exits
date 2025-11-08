@@ -35,6 +35,22 @@ A hobby tool to create on-demand Tailscale VPN exit nodes in AWS. Spin up exit n
 
 **Don't trust compiled tools?** Check out [DIY.md](DIY.md) for the curl-only approach (no CLI needed).
 
+## Installation
+
+```bash
+# Download and install (replace with your platform: linux-amd64, linux-arm64, darwin-arm64)
+curl -L https://github.com/anoldguy/tailscale-exits/releases/latest/download/tse-linux-amd64.tar.gz | tar xz
+sudo mv tse /usr/local/bin/
+```
+
+Or build from source:
+```bash
+git clone https://github.com/anoldguy/tailscale-exits
+cd tailscale-exits
+make build-cli
+sudo mv bin/tse /usr/local/bin/
+```
+
 ## Quick Start
 
 **Already have TSE configured?** Jump to [Usage](#usage)
@@ -139,10 +155,6 @@ Yes, this is annoying. Welcome to AWS IAM, where everything is a policy document
 
 **1.2 Run the setup command:**
 ```bash
-git clone https://github.com/anoldguy/tailscale-exits
-cd tailscale-exits
-make build-cli
-
 # Create .env file with your API token
 cp .env.example .env
 # Edit .env and add your TAILSCALE_API_TOKEN
@@ -151,7 +163,7 @@ cp .env.example .env
 export TAILSCALE_API_TOKEN=tskey-api-xxxxx
 
 # Run setup
-./bin/tse setup --tailnet yourname@github  # Use your tailnet name
+tse setup --tailnet yourname@github  # Use your tailnet name
 ```
 
 Find your tailnet name by running `tailscale status` or checking your admin console URL.
@@ -172,7 +184,7 @@ This command will:
 export TAILSCALE_AUTH_KEY=tskey-auth-xxxxx
 
 # Deploy infrastructure
-./bin/tse deploy
+tse deploy
 
 # The deploy output will show TSE_AUTH_TOKEN and TSE_LAMBDA_URL
 # Add these to your .env file for persistence
@@ -197,16 +209,16 @@ echo 'dotenv' > .envrc
 direnv allow
 
 # Start an exit node in Ohio
-./bin/tse ohio start
+tse ohio start
 
 # Verify it's running
-./bin/tse ohio instances
+tse ohio instances
 
 # In your Tailscale app, you should see "exit-ohio" as an available exit node
 # Select it and your traffic routes through Ohio!
 
 # When done
-./bin/tse ohio stop
+tse ohio stop
 ```
 
 **That's it!** You now have on-demand exit nodes in any AWS region.
@@ -215,25 +227,25 @@ direnv allow
 
 ```bash
 # Health check
-./bin/tse health
+tse health
 
 # Start exit node in any region
-./bin/tse <region> start
+tse <region> start
 
 # List running instances in a region
-./bin/tse <region> instances
+tse <region> instances
 
 # Stop all instances in a region
-./bin/tse <region> stop
+tse <region> stop
 
 # Stop exit nodes in ALL regions (prevents surprise bills!)
-./bin/tse shutdown
+tse shutdown
 
 # Check infrastructure status
-./bin/tse status
+tse status
 
 # Check Tailscale setup status
-./bin/tse setup --tailnet yourname@github --status
+tse setup --tailnet yourname@github --status
 ```
 
 ## Available Regions
@@ -336,13 +348,13 @@ Everything except running EC2 instances is free. VPCs and networking components 
 
 ```bash
 # Stop all exit nodes in ALL regions (recommended)
-./bin/tse shutdown
+tse shutdown
 
 # Or stop exit nodes in a specific region
-./bin/tse <region> stop
+tse <region> stop
 
 # Remove all AWS infrastructure (Lambda, IAM roles, etc.)
-./bin/tse teardown
+tse teardown
 ```
 
 ## Security
@@ -367,7 +379,7 @@ If your token is compromised, rotate it:
 unset TSE_AUTH_TOKEN
 
 # Redeploy (will generate new token)
-./bin/tse deploy
+tse deploy
 
 # Update your .env file with the new token
 ```
@@ -453,16 +465,16 @@ Replace `{region}` with any friendly region name (ohio, virginia, etc.).
 
 ```bash
 # Check current configuration without making changes
-./bin/tse setup --tailnet yourname@github --status
+tse setup --tailnet yourname@github --status
 
 # Preview ACL changes without applying
-./bin/tse setup --tailnet yourname@github --show-acl-changes
+tse setup --tailnet yourname@github --show-acl-changes
 
 # Skip ACL configuration (only create auth key)
-./bin/tse setup --tailnet yourname@github --skip-acl
+tse setup --tailnet yourname@github --skip-acl
 
 # Skip auth key creation (only configure ACL)
-./bin/tse setup --tailnet yourname@github --skip-auth-key
+tse setup --tailnet yourname@github --skip-auth-key
 ```
 
 ### Environment Variable Management

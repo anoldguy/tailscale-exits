@@ -1,0 +1,48 @@
+version: 2
+
+builds:
+  - id: tse
+    binary: tse
+    main: ./cmd/tse
+
+    env:
+      - CGO_ENABLED=0
+
+    goos:
+      - linux
+      - darwin
+
+    goarch:
+      - amd64
+      - arm64
+
+    # Exclude Intel Mac because those belong in museums
+    ignore:
+      - goos: darwin
+        goarch: amd64
+
+    ldflags:
+      - -s -w
+      - -X main.version={{.Version}}
+      - -X main.commit={{.Commit}}
+      - -X main.date={{.Date}}
+
+    # Pure Go everything - no C dependencies
+    tags:
+      - netgo
+      - osusergo
+
+archives:
+  - format: tar.gz
+    name_template: "{{ .ProjectName }}-{{ .Os }}-{{ .Arch }}"
+
+checksum:
+  name_template: 'checksums.txt'
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
+      - '^chore:'
