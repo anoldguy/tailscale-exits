@@ -2,6 +2,7 @@
 bin/
 lambda/bootstrap
 **/*.zip
+dist/
 
 # IDE and local config
 .claude/
