@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"os"
 
 	"github.com/anoldguy/tse/cmd/tse/infrastructure"
 	"github.com/anoldguy/tse/cmd/tse/ui"
@@ -11,28 +10,7 @@ import (
 
 // runDeploy deploys TSE infrastructure to AWS.
 func runDeploy(args []string) error {
-	// Validate prerequisites
-	if os.Getenv("TAILSCALE_AUTH_KEY") == "" {
-		return fmt.Errorf(`TAILSCALE_AUTH_KEY environment variable not set
-
-The Lambda function requires a Tailscale auth key to join exit nodes to your network.
-
-To create one:
-  1. Run: tse setup --tailnet <your-tailnet>
-     This will configure Tailscale and create an auth key automatically.
-
-Or create manually:
-  1. Visit: https://login.tailscale.com/admin/settings/keys
-  2. Generate an auth key with these settings:
-     - Reusable: Yes
-     - Ephemeral: Yes
-     - Tags: tag:exitnode
-     - Pre-authorized: Yes
-  3. Set: export TAILSCALE_AUTH_KEY=<your-key>
-
-Then run 'tse deploy' again.`)
-	}
-
+	// Prerequisites already validated in main.go
 	ctx := context.Background()
 
 	// Get default AWS region from user's configuration

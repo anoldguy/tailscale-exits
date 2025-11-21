@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -65,6 +66,13 @@ func main() {
 		return
 	}
 
+	// Validate command prerequisites early
+	ctx := context.Background()
+	if err := validateCommand(ctx, command); err != nil {
+		fmt.Fprintf(os.Stderr, "%s %v\n", ui.Error("Error:"), err)
+		os.Exit(1)
+	}
+
 	// Handle setup command (doesn't require TSE_LAMBDA_URL)
 	if command == "setup" {
 		err := runSetup(os.Args[2:])
@@ -117,14 +125,8 @@ func main() {
 		return
 	}
 
-	// All other commands require TSE_LAMBDA_URL
+	// All other commands require TSE_LAMBDA_URL (already validated above)
 	lambdaURL := os.Getenv("TSE_LAMBDA_URL")
-	if lambdaURL == "" {
-		fmt.Fprintf(os.Stderr, "%s TSE_LAMBDA_URL environment variable not set\n", ui.Error("Error:"))
-		fmt.Fprintf(os.Stderr, "\n%s First run 'tse setup' to configure Tailscale, then deploy the Lambda.\n", ui.Info("Hint:"))
-		os.Exit(1)
-	}
-
 	// Remove trailing slash if present
 	lambdaURL = strings.TrimSuffix(lambdaURL, "/")
 
