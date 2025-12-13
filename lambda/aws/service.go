@@ -455,7 +455,6 @@ func (s *Service) StartInstance(ctx context.Context, friendlyRegion, authKey str
 		MaxCount:         aws.Int32(1),
 		SubnetId:         aws.String(subnetID),
 		SecurityGroupIds: []string{sgID},
-		KeyName:          aws.String("tailscale"), // Temporary for debugging
 		UserData:         aws.String(userData),
 		TagSpecifications: []types.TagSpecification{
 			{
