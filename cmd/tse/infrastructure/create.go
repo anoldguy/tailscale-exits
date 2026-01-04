@@ -275,15 +275,27 @@ func createLambdaFunction(ctx context.Context, clients *AWSClients, functionName
 }
 
 // isIAMPropagationError checks if an error is due to IAM eventual consistency.
-// Returns true if the error indicates the role cannot be assumed yet.
+// Returns true if the error indicates Lambda creation should be retried.
+// This catches two known IAM propagation patterns:
+// 1. Role cannot be assumed yet: "The role ... cannot be assumed by Lambda"
+// 2. KMS can't grant to new role: "ARN does not refer to a valid principal"
 func isIAMPropagationError(err error) bool {
 	if err == nil {
 		return false
 	}
 	errMsg := err.Error()
-	// Check for InvalidParameterValueException with "cannot be assumed" message
-	return strings.Contains(errMsg, "InvalidParameterValueException") &&
-		strings.Contains(errMsg, "cannot be assumed")
+	if !strings.Contains(errMsg, "InvalidParameterValueException") {
+		return false
+	}
+	// Pattern 1: Lambda can't assume the role yet
+	if strings.Contains(errMsg, "cannot be assumed") {
+		return true
+	}
+	// Pattern 2: KMS can't recognize the role as a valid principal for env var encryption
+	if strings.Contains(errMsg, "KMS") && strings.Contains(errMsg, "not refer to a valid principal") {
+		return true
+	}
+	return false
 }
 
 // createLambdaFunctionWithRetry creates the Lambda function, retrying on IAM propagation errors.
