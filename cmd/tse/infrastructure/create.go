@@ -274,6 +274,22 @@ func createLambdaFunction(ctx context.Context, clients *AWSClients, functionName
 	return *result.FunctionArn, nil
 }
 
+// updateLambdaCode ships freshly compiled code to an existing function.
+// Deploy has to do this explicitly: createLambdaFunction only runs when the
+// function is missing, so without this a redeploy against a live stack is a
+// no-op and code changes never reach the exit nodes.
+func updateLambdaCode(ctx context.Context, clients *AWSClients, functionName string, zipBytes []byte) error {
+	_, err := clients.Lambda.UpdateFunctionCode(ctx, &lambda.UpdateFunctionCodeInput{
+		FunctionName: aws.String(functionName),
+		ZipFile:      zipBytes,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to update Lambda function code: %w", err)
+	}
+
+	return nil
+}
+
 // isIAMPropagationError checks if an error is due to IAM eventual consistency.
 // Returns true if the error indicates Lambda creation should be retried.
 // This catches two known IAM propagation patterns:

@@ -38,6 +38,23 @@ func Setup(ctx context.Context, region string) (*SetupResult, error) {
 	if state.IsComplete() {
 		fmt.Println("✓ Infrastructure already deployed")
 		fmt.Println()
+
+		// Deployed is not the same as current. Push the handler anyway, or a
+		// redeploy after a code change is a cheerful no-op and the user is left
+		// wondering why their fix never reached the exit nodes.
+		clients, err := NewAWSClients(ctx, region)
+		if err != nil {
+			return nil, err
+		}
+
+		if err := buildAndUpdateLambdaCode(ctx, clients); err != nil {
+			return nil, err
+		}
+
+		fmt.Println()
+		fmt.Println(ui.Success("✓ Lambda function code updated!"))
+		fmt.Println()
+
 		// Still need to return auth token even if already deployed
 		tseAuthToken := os.Getenv("TSE_AUTH_TOKEN")
 		return &SetupResult{
@@ -131,6 +148,11 @@ func Setup(ctx context.Context, region string) (*SetupResult, error) {
 		if _, err := createLambdaFunctionWithRetry(ctx, clients, FunctionName, roleARN, zipBytes, tailscaleAuthKey, tseAuthToken); err != nil {
 			return nil, err
 		}
+	} else {
+		// Function survived a partial teardown; refresh its code.
+		if err := buildAndUpdateLambdaCode(ctx, clients); err != nil {
+			return nil, err
+		}
 	}
 
 	// 8. Create Function URL (if missing)
@@ -162,6 +184,23 @@ func Setup(ctx context.Context, region string) (*SetupResult, error) {
 		AuthToken:    tseAuthToken,
 		WasGenerated: wasGenerated,
 	}, nil
+}
+
+// buildAndUpdateLambdaCode recompiles the handler and ships it to the existing
+// function, with the same spinners the create path uses.
+func buildAndUpdateLambdaCode(ctx context.Context, clients *AWSClients) error {
+	var zipBytes []byte
+	if err := ui.WithSpinner("Building Lambda function (linux/arm64)", func() error {
+		var err error
+		zipBytes, err = buildLambdaZip()
+		return err
+	}); err != nil {
+		return err
+	}
+
+	return ui.WithSpinner("Updating Lambda function code", func() error {
+		return updateLambdaCode(ctx, clients, FunctionName, zipBytes)
+	})
 }
 
 // generateAuthToken creates a cryptographically secure random token.
