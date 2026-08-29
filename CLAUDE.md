@@ -47,7 +47,8 @@ make test-verbose
 **Deployment Flow:**
 - `tse deploy` compiles Lambda from source, creates all AWS resources
 - Uses tag-based discovery (`ManagedBy=tse`) for state management
-- Idempotent - safe to re-run
+- Converges on re-run: missing resources are created, and an existing function
+  gets both its code and its environment updated
 - No local state files required
 
 **Environment Variables Required:**
@@ -170,7 +171,12 @@ Tailscale ACL must include:
 }
 ```
 
-**Critical:** If ACL config doesn't match auth key tags, instances won't auto-approve. You'll see them in Tailscale admin but not as exit nodes.
+**Critical:** The ACL is load-bearing in two separate ways, and the OAuth
+client's settings do not substitute for either. `tagOwners` is what makes
+`tag:exitnode` exist at all, and `autoApprovers.exitNode` is what approves the
+advertised exit node route. The `preauthorized` parameter only covers device
+approval, which is a different question. Get the second one wrong and instances
+appear in Tailscale admin but not as exit nodes, waiting on a manual click.
 
 ### Tailscale API Integration
 
@@ -180,7 +186,6 @@ The `tse setup` command automates Tailscale configuration using the Tailscale AP
 - `GET /api/v2/tailnet/{tailnet}/acl` - Retrieve current ACL policy (includes ETag)
 - `POST /api/v2/tailnet/{tailnet}/acl` - Update ACL policy (full replacement)
 - `POST /api/v2/tailnet/{tailnet}/acl/validate` - Validate ACL before applying
-- `POST /api/v2/tailnet/{tailnet}/keys` - Create auth keys programmatically
 
 **Authentication:**
 - Requires `TAILSCALE_API_TOKEN` environment variable (API access token)
@@ -193,8 +198,8 @@ The `tse setup` command automates Tailscale configuration using the Tailscale AP
 - Reads existing ACL policy and merges in required configuration (idempotent)
 - Only adds `tag:exitnode` to `tagOwners` if not already present
 - Only adds exit node auto-approval if not already configured
-- Creates auth key with: reusable=true, ephemeral=true, tags=["tag:exitnode"], preauthorized=true
-- Displays auth key for user to save in `.env` file
+- Prints instructions for creating the OAuth client; it no longer mints auth
+  keys, because a key it minted would expire in 90 days and cannot be renewed
 - Uses ETag-based collision avoidance when updating ACL (If-Match header)
 - Validates ACL changes before applying
 
@@ -213,6 +218,19 @@ Check `TSE_LAMBDA_URL` is set and points to Function URL (not API Gateway).
 1. Check ACL has `tag:exitnode` in tagOwners and autoApprovers
 2. Check the OAuth client has the `tag:exitnode` tag (secret stored in `.env` as `TAILSCALE_OAUTH_SECRET`)
 3. Wait 60 seconds - instance needs time to install Tailscale
+
+### Exit Node Boots But Never Joins The Tailnet
+Read the console output first: `aws ec2 get-console-output --region <aws-region>
+--instance-id i-xxxx --latest --output text`. AL2023 tees cloud-init to the
+console, so this gives you `/var/log/cloud-init-output.log` without needing to
+reach the box. The user data script traps errors and names the failing line.
+
+Do not switch the install back to `tailscale.com/install.sh`. On AL2023 it takes
+the yum path, and refreshing the repo metadata needs more memory than a
+`t4g.nano` has, so dnf gets OOM-killed and Tailscale never lands. The static
+tarball is a download and four copies, which fits in 512MB. This failure looks
+regional because the metadata has grown over time and older instances survived
+it; it is not.
 
 ### VPC Won't Delete
 Instances still terminating. Wait 60 seconds and run `tse <region> cleanup`.
@@ -261,6 +279,11 @@ Infrastructure deployment is pure Go using AWS SDK v2:
 - buildLambdaZip() - compiles Lambda for linux/arm64 in-memory
 - Creates: Log Group, IAM Role, Policies, Lambda Function, Function URL
 - Adds resource-based policy for Function URL public access
+- Also holds the update path: code and configuration are separate API calls, so
+  updateLambdaCode() and updateLambdaConfiguration() both run on a redeploy with
+  a waiter between them. mergeLambdaEnvironment() reads the deployed variables
+  first, because UpdateFunctionConfiguration replaces the whole map and a naive
+  write would blank out TSE_AUTH_TOKEN.
 
 **Deletion** (`cmd/tse/infrastructure/delete.go`):
 - Deletes resources in reverse dependency order
@@ -269,7 +292,8 @@ Infrastructure deployment is pure Go using AWS SDK v2:
 **Setup** (`cmd/tse/infrastructure/setup.go`):
 - Orchestrates idempotent deployment
 - Handles IAM eventual consistency (10s wait)
-- Generates TSE_AUTH_TOKEN if not provided
+- Generates TSE_AUTH_TOKEN if not provided on first deploy; on a redeploy an
+  unset token means "keep what is live" rather than "generate a new one"
 
 **Teardown** (`cmd/tse/infrastructure/teardown.go`):
 - Discovers and deletes all resources

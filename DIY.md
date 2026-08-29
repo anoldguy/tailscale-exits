@@ -4,7 +4,8 @@ Don't trust compiled binaries? Prefer curl? This guide shows you how to do every
 
 **What this guide covers:**
 - Configuring Tailscale ACL with raw API calls
-- Creating Tailscale auth keys with curl
+- Creating Tailscale auth keys with curl (see the note in Step 6; the CLI uses
+  a non-expiring OAuth client secret instead)
 - Deploying infrastructure with auditable Go code
 - Managing exit nodes with curl (no CLI needed)
 
@@ -507,8 +508,20 @@ done
 3. **User data script runs on boot**:
    ```bash
    #!/bin/bash
-   # Install Tailscale
-   curl -fsSL https://tailscale.com/install.sh | sh
+   # Install Tailscale from the static tarball. Do not use install.sh here: on
+   # AL2023 it takes the yum path, and refreshing the repo metadata needs more
+   # memory than a t4g.nano has, so dnf gets OOM-killed and nothing installs.
+   cd /var/tmp
+   VERSION=$(curl -fsSL 'https://pkgs.tailscale.com/stable/?mode=json' \
+     | grep -o '"TarballsVersion": *"[^"]*"' | cut -d'"' -f4)
+   curl -fsSL "https://pkgs.tailscale.com/stable/tailscale_${VERSION}_arm64.tgz" | tar xzf -
+   cd "tailscale_${VERSION}_arm64"
+   install -m 755 tailscale /usr/bin/tailscale
+   install -m 755 tailscaled /usr/sbin/tailscaled
+   install -m 644 systemd/tailscaled.service /etc/systemd/system/tailscaled.service
+   install -m 644 systemd/tailscaled.defaults /etc/default/tailscaled
+   systemctl daemon-reload
+   systemctl enable --now tailscaled
 
    # Enable IP forwarding
    echo 'net.ipv4.ip_forward = 1' >> /etc/sysctl.conf

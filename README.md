@@ -170,8 +170,24 @@ Find your tailnet name by running `tailscale status` or checking your admin cons
 
 This command will:
 - Configure your Tailscale ACL for exit node auto-approval
-- Create an auth key for exit nodes
-- Display the key for you to save in your `.env` file
+- Show you how to create the OAuth client the Lambda needs
+
+**1.3 Create an OAuth client:**
+1. Visit https://login.tailscale.com/admin/settings/oauth
+2. Generate a client with the `auth_keys` scope, write access
+3. Assign the `tag:exitnode` tag to that scope
+4. Copy the secret (starts with `tskey-client-`); it is shown only once
+
+Run setup first. The tag picker only offers tags that already exist in your
+ACL, and setup is what puts `tag:exitnode` there.
+
+Exit nodes authenticate with this secret rather than a stored auth key. Auth
+keys cap at 90 days and cannot be renewed, so a saved one stops working a
+quarter after you set it up, and the symptom is nodes that boot cleanly and
+never appear in your tailnet. OAuth client secrets do not expire. Tailscale
+mints a fresh single-use tagged key from the secret each time a node
+registers, which also means there is no reusable credential sitting in your
+`.env` that could enroll someone else's machine.
 
 ### Step 2: Deploy to AWS (3 minutes)
 
@@ -375,16 +391,19 @@ The CLI automatically includes this token in all requests via the `TSE_AUTH_TOKE
 If your token is compromised, rotate it:
 
 ```bash
-# Unset the old token
-unset TSE_AUTH_TOKEN
-
-# Redeploy (will generate new token)
+# Generate a replacement and deploy it
+export TSE_AUTH_TOKEN=$(openssl rand -hex 32)
 tse deploy
 
 # Update your .env file with the new token
 ```
 
 The old token is immediately invalidated when the new Lambda deploys.
+
+Set the new value explicitly rather than unsetting the old one. Deploy treats
+an unset `TSE_AUTH_TOKEN` as "leave whatever is deployed alone," which is what
+keeps a routine redeploy from locking you out of your own Lambda. The tradeoff
+is that unsetting it rotates nothing.
 
 ### What's Protected
 
@@ -474,11 +493,8 @@ tse setup --tailnet yourname@github --status
 # Preview ACL changes without applying
 tse setup --tailnet yourname@github --show-acl-changes
 
-# Skip ACL configuration (only create auth key)
+# Skip ACL configuration (only print the OAuth client instructions)
 tse setup --tailnet yourname@github --skip-acl
-
-# Skip auth key creation (only configure ACL)
-tse setup --tailnet yourname@github --skip-auth-key
 ```
 
 ### Environment Variable Management
