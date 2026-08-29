@@ -244,7 +244,7 @@ func createInlinePolicy(ctx context.Context, clients *AWSClients, roleName strin
 
 // createLambdaFunction creates the Lambda function with the provided configuration.
 // Returns the function ARN.
-func createLambdaFunction(ctx context.Context, clients *AWSClients, functionName string, roleARN string, zipBytes []byte, tailscaleAuthKey string, tseAuthToken string) (string, error) {
+func createLambdaFunction(ctx context.Context, clients *AWSClients, functionName string, roleARN string, zipBytes []byte, tailscaleOAuthSecret string, tseAuthToken string) (string, error) {
 	// Convert tags to Lambda tag format
 	lambdaTags := standardTags()
 
@@ -261,8 +261,8 @@ func createLambdaFunction(ctx context.Context, clients *AWSClients, functionName
 		Timeout:       aws.Int32(60),
 		Environment: &lambdatypes.Environment{
 			Variables: map[string]string{
-				"TAILSCALE_AUTH_KEY": tailscaleAuthKey,
-				"TSE_AUTH_TOKEN":     tseAuthToken,
+				"TAILSCALE_OAUTH_SECRET": tailscaleOAuthSecret,
+				"TSE_AUTH_TOKEN":         tseAuthToken,
 			},
 		},
 		Tags: lambdaTags,
@@ -318,12 +318,12 @@ func isIAMPropagationError(err error) bool {
 // Shows rotating snarky messages if we hit propagation delays.
 // Handles its own UI - starts with regular spinner, switches to rotating messages if needed.
 // Returns the function ARN.
-func createLambdaFunctionWithRetry(ctx context.Context, clients *AWSClients, functionName string, roleARN string, zipBytes []byte, tailscaleAuthKey string, tseAuthToken string) (string, error) {
+func createLambdaFunctionWithRetry(ctx context.Context, clients *AWSClients, functionName string, roleARN string, zipBytes []byte, tailscaleOAuthSecret string, tseAuthToken string) (string, error) {
 	// Try immediately with a regular spinner
 	var arn string
 	err := ui.WithSpinner("Creating Lambda function", func() error {
 		var err error
-		arn, err = createLambdaFunction(ctx, clients, functionName, roleARN, zipBytes, tailscaleAuthKey, tseAuthToken)
+		arn, err = createLambdaFunction(ctx, clients, functionName, roleARN, zipBytes, tailscaleOAuthSecret, tseAuthToken)
 		return err
 	})
 
@@ -343,7 +343,7 @@ func createLambdaFunctionWithRetry(ctx context.Context, clients *AWSClients, fun
 	var finalErr error
 
 	retryErr := ui.WithRotatingMessages(iamPropagationMessages, func() error {
-		arn, err := createLambdaFunction(ctx, clients, functionName, roleARN, zipBytes, tailscaleAuthKey, tseAuthToken)
+		arn, err := createLambdaFunction(ctx, clients, functionName, roleARN, zipBytes, tailscaleOAuthSecret, tseAuthToken)
 		if err == nil {
 			finalARN = arn
 			return nil

@@ -81,8 +81,8 @@ func validateTailscaleAPI() error {
 
 // validateTailscaleAuth checks that Tailscale auth key is configured (for deploy command)
 func validateTailscaleAuth() error {
-	if os.Getenv("TAILSCALE_AUTH_KEY") == "" {
-		return fmt.Errorf("TAILSCALE_AUTH_KEY not set\n\nRun 'tse setup --tailnet <your-tailnet>' to create an auth key, then export it:\n  export TAILSCALE_AUTH_KEY=<your-key>")
+	if os.Getenv("TAILSCALE_OAUTH_SECRET") == "" {
+		return fmt.Errorf("TAILSCALE_OAUTH_SECRET not set\n\nCreate an OAuth client with the auth_keys scope and the tag:exitnode tag at\nhttps://login.tailscale.com/admin/settings/oauth, then export the secret:\n  export TAILSCALE_OAUTH_SECRET=tskey-client-...")
 	}
 
 	return nil

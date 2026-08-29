@@ -76,8 +76,11 @@ install -m 644 systemd/tailscaled.defaults /etc/default/tailscaled
 systemctl daemon-reload
 systemctl enable --now tailscaled
 
-# Start Tailscale with exit node advertisement
-tailscale up --authkey={{.AuthKey}} --advertise-exit-node --hostname=exit-{{.Region}}
+# Start Tailscale with exit node advertisement.
+# The auth key here is an OAuth client secret; Tailscale mints a single-use
+# tagged key from it at registration. Single quotes are load-bearing: unquoted,
+# bash reads the & as "background this" and preauthorized never arrives.
+tailscale up --auth-key='{{.OAuthSecret}}?ephemeral=true&preauthorized=true' --advertise-tags=tag:exitnode --advertise-exit-node --hostname=exit-{{.Region}}
 
 # Log completion
 echo "Tailscale exit node setup complete for region: {{.Region}}" | logger -t tse-setup
@@ -85,12 +88,14 @@ echo "Tailscale exit node setup complete for region: {{.Region}}" | logger -t ts
 
 var userDataTmpl = template.Must(template.New("userdata").Parse(userDataTemplate))
 
-// generateUserData creates the user data script for Tailscale installation
-func generateUserData(authKey, friendlyRegion string) string {
+// generateUserData creates the user data script for Tailscale installation.
+// oauthSecret is a non-expiring OAuth client secret (tskey-client-...), not a
+// 90-day auth key; see the note on userDataTemplate.
+func generateUserData(oauthSecret, friendlyRegion string) string {
 	var buf bytes.Buffer
 	err := userDataTmpl.Execute(&buf, map[string]string{
-		"AuthKey": authKey,
-		"Region":  friendlyRegion,
+		"OAuthSecret": oauthSecret,
+		"Region":      friendlyRegion,
 	})
 	if err != nil {
 		// Template execution should never fail with a constant template
@@ -436,7 +441,7 @@ func (s *Service) createVPCStack(ctx context.Context, friendlyRegion string) (st
 }
 
 // StartInstance creates a new exit node instance
-func (s *Service) StartInstance(ctx context.Context, friendlyRegion, authKey string) (*sharedtypes.InstanceInfo, error) {
+func (s *Service) StartInstance(ctx context.Context, friendlyRegion, oauthSecret string) (*sharedtypes.InstanceInfo, error) {
 	awsRegion, err := regions.GetAWSRegion(friendlyRegion)
 	if err != nil {
 		return nil, err
@@ -461,7 +466,7 @@ func (s *Service) StartInstance(ctx context.Context, friendlyRegion, authKey str
 	}
 
 	// Generate user data script
-	userData := generateUserData(authKey, friendlyRegion)
+	userData := generateUserData(oauthSecret, friendlyRegion)
 
 	// Launch instance
 	runResult, err := s.ec2Client.RunInstances(ctx, &ec2.RunInstancesInput{

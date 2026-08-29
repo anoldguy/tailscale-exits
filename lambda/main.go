@@ -142,9 +142,9 @@ func handleStartInstance(ctx context.Context, friendlyRegion string) (events.Lam
 	}
 
 	// Get Tailscale auth key from environment
-	authKey := os.Getenv("TAILSCALE_AUTH_KEY")
-	if authKey == "" {
-		return errorResponse(http.StatusInternalServerError, "TAILSCALE_AUTH_KEY environment variable not set"), nil
+	oauthSecret := os.Getenv("TAILSCALE_OAUTH_SECRET")
+	if oauthSecret == "" {
+		return errorResponse(http.StatusInternalServerError, "TAILSCALE_OAUTH_SECRET environment variable not set"), nil
 	}
 
 	// Create AWS service for the region
@@ -172,7 +172,7 @@ func handleStartInstance(ctx context.Context, friendlyRegion string) (events.Lam
 	}
 
 	// Start new instance
-	instance, err := service.StartInstance(ctx, friendlyRegion, authKey)
+	instance, err := service.StartInstance(ctx, friendlyRegion, oauthSecret)
 	if err != nil {
 		return errorResponse(http.StatusInternalServerError, fmt.Sprintf("Failed to start instance: %v", err)), nil
 	}

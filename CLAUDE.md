@@ -51,7 +51,7 @@ make test-verbose
 - No local state files required
 
 **Environment Variables Required:**
-- `TAILSCALE_AUTH_KEY` - For Lambda to join exit nodes to your network
+- `TAILSCALE_OAUTH_SECRET` - OAuth client secret; the Lambda passes it to `tailscale up`, which mints a single-use tagged key per node
 - `TSE_AUTH_TOKEN` - Generated during deploy, used for Lambda API auth
 - `TSE_LAMBDA_URL` - Function URL, output by deploy
 
@@ -141,13 +141,22 @@ Both Lambda and CLI use the same mapping. Rebuild CLI after changes.
 
 ### Tailscale Integration
 
-The Lambda requires `TAILSCALE_AUTH_KEY` environment variable (set during deployment).
+The Lambda requires `TAILSCALE_OAUTH_SECRET` environment variable (set during deployment).
 
-Auth key requirements (created via `tse setup` or manually in Tailscale admin console):
-- ✅ Reusable
-- ✅ Ephemeral (instances auto-removed when terminated)
-- ✅ Tagged with `tag:exitnode`
-- ✅ Pre-approved
+This is an OAuth client secret (`tskey-client-...`), not an auth key. Auth keys
+cap at 90 days and cannot be renewed, which is how the original build quietly
+broke three months after it shipped. OAuth client secrets do not expire.
+
+OAuth client requirements (created manually at
+https://login.tailscale.com/admin/settings/oauth; there is no API for it):
+- ✅ `auth_keys` scope with write access
+- ✅ Assigned the `tag:exitnode` tag
+
+The node's user data passes the secret as
+`--auth-key='<secret>?ephemeral=true&preauthorized=true'` along with
+`--advertise-tags=tag:exitnode`. Tailscale mints a single-use tagged key at
+registration. The single quotes are load-bearing: unquoted, bash reads the `&`
+as "background this command" and `preauthorized` never arrives.
 
 Tailscale ACL must include:
 ```json
@@ -202,7 +211,7 @@ Check `TSE_LAMBDA_URL` is set and points to Function URL (not API Gateway).
 
 ### Exit Node Doesn't Appear in Tailscale
 1. Check ACL has `tag:exitnode` in tagOwners and autoApprovers
-2. Check auth key has `tag:exitnode` (stored in `.env` as `TAILSCALE_AUTH_KEY`)
+2. Check the OAuth client has the `tag:exitnode` tag (secret stored in `.env` as `TAILSCALE_OAUTH_SECRET`)
 3. Wait 60 seconds - instance needs time to install Tailscale
 
 ### VPC Won't Delete

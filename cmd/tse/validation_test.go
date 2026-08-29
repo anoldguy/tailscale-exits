@@ -116,27 +116,27 @@ func TestValidateTailscaleAPI(t *testing.T) {
 func TestValidateTailscaleAuth(t *testing.T) {
 	tests := []struct {
 		name          string
-		authKey       string
+		oauthSecret   string
 		expectError   bool
 		errorContains string
 	}{
 		{
 			name:        "auth key set - should pass",
-			authKey:     "tskey-auth-test123",
+			oauthSecret: "tskey-client-test123",
 			expectError: false,
 		},
 		{
 			name:          "auth key missing",
-			authKey:       "",
+			oauthSecret:   "",
 			expectError:   true,
-			errorContains: "TAILSCALE_AUTH_KEY not set",
+			errorContains: "TAILSCALE_OAUTH_SECRET not set",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			os.Setenv("TAILSCALE_AUTH_KEY", tt.authKey)
-			defer os.Unsetenv("TAILSCALE_AUTH_KEY")
+			os.Setenv("TAILSCALE_OAUTH_SECRET", tt.oauthSecret)
+			defer os.Unsetenv("TAILSCALE_OAUTH_SECRET")
 
 			err := validateTailscaleAuth()
 

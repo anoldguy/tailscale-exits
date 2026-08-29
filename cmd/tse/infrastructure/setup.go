@@ -69,9 +69,9 @@ func Setup(ctx context.Context, region string) (*SetupResult, error) {
 	fmt.Println()
 
 	// 2. Get secrets from environment
-	tailscaleAuthKey := os.Getenv("TAILSCALE_AUTH_KEY")
-	if tailscaleAuthKey == "" {
-		return nil, fmt.Errorf("TAILSCALE_AUTH_KEY environment variable not set\n\nHint: Export your Tailscale auth key:\n  export TAILSCALE_AUTH_KEY=tskey-auth-...")
+	tailscaleOAuthSecret := os.Getenv("TAILSCALE_OAUTH_SECRET")
+	if tailscaleOAuthSecret == "" {
+		return nil, fmt.Errorf("TAILSCALE_OAUTH_SECRET environment variable not set\n\nHint: Export your Tailscale OAuth client secret:\n  export TAILSCALE_OAUTH_SECRET=tskey-client-...")
 	}
 
 	// Generate or reuse auth token
@@ -145,7 +145,7 @@ func Setup(ctx context.Context, region string) (*SetupResult, error) {
 		}
 
 		// Create function (handles its own UI - spinner for normal case, rotating messages for IAM delays)
-		if _, err := createLambdaFunctionWithRetry(ctx, clients, FunctionName, roleARN, zipBytes, tailscaleAuthKey, tseAuthToken); err != nil {
+		if _, err := createLambdaFunctionWithRetry(ctx, clients, FunctionName, roleARN, zipBytes, tailscaleOAuthSecret, tseAuthToken); err != nil {
 			return nil, err
 		}
 	} else {

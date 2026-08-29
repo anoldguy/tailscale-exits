@@ -132,6 +132,11 @@ This returns:
 }
 ```
 
+> **Note:** auth keys cap at 90 days and cannot be renewed. TSE itself now uses
+> an OAuth client secret instead, which does not expire. See README for that
+> path; the auth key walkthrough below still works, but you will be back here
+> in three months.
+
 **Save this auth key:**
 ```bash
 AUTH_KEY="tskey-auth-xxxxx"
@@ -302,7 +307,7 @@ aws lambda create-function \
   --memory-size 256 \
   --timeout 60 \
   --zip-file fileb://lambda/lambda.zip \
-  --environment Variables="{TAILSCALE_AUTH_KEY=$TAILSCALE_AUTH_KEY,TSE_AUTH_TOKEN=$TSE_AUTH_TOKEN}" \
+  --environment Variables="{TAILSCALE_OAUTH_SECRET=$TAILSCALE_OAUTH_SECRET,TSE_AUTH_TOKEN=$TSE_AUTH_TOKEN}" \
   --tags ManagedBy=tse
 ```
 
@@ -510,9 +515,11 @@ done
    echo 'net.ipv6.conf.all.forwarding = 1' >> /etc/sysctl.conf
    sysctl -p
 
-   # Start Tailscale with auth key and advertise as exit node
+   # Start Tailscale with the OAuth client secret and advertise as exit node.
+   # Single quotes matter: unquoted, bash backgrounds on the & in the query string.
    tailscale up \
-     --authkey="$TAILSCALE_AUTH_KEY" \
+     --auth-key="${TAILSCALE_OAUTH_SECRET}?ephemeral=true&preauthorized=true" \
+     --advertise-tags=tag:exitnode \
      --hostname="exit-ohio" \
      --advertise-exit-node \
      --ssh
@@ -746,7 +753,7 @@ A: It is! Just use Mullvad or ProtonVPN if you want simple. This is for tinkerer
   # Update Lambda environment variables
   aws lambda update-function-configuration \
     --function-name tailscale-exits \
-    --environment Variables="{TAILSCALE_AUTH_KEY=$TAILSCALE_AUTH_KEY,TSE_AUTH_TOKEN=$NEW_TOKEN}"
+    --environment Variables="{TAILSCALE_OAUTH_SECRET=$TAILSCALE_OAUTH_SECRET,TSE_AUTH_TOKEN=$NEW_TOKEN}"
 
   # Update your local .env file
   echo "TSE_AUTH_TOKEN=$NEW_TOKEN" >> .env

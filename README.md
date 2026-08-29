@@ -176,12 +176,12 @@ This command will:
 ### Step 2: Deploy to AWS (3 minutes)
 
 ```bash
-# Add the Tailscale auth key to .env (from setup output)
+# Add the Tailscale OAuth client secret to .env
 # Edit .env and add:
-#   TAILSCALE_AUTH_KEY=tskey-auth-xxxxx
+#   TAILSCALE_OAUTH_SECRET=tskey-client-xxxxx
 
 # Or export directly
-export TAILSCALE_AUTH_KEY=tskey-auth-xxxxx
+export TAILSCALE_OAUTH_SECRET=tskey-client-xxxxx
 
 # Deploy infrastructure
 tse deploy
@@ -405,14 +405,18 @@ The old token is immediately invalidated when the new Lambda deploys.
 
 If you prefer to configure Tailscale manually instead of using `tse setup`:
 
-#### 1. Create Auth Key
-In Tailscale Admin Console → Settings → Keys, create a key with:
-- ✅ Reusable
-- ✅ Ephemeral
-- ✅ Tagged with `tag:exitnode`
-- ✅ Pre-approved
+#### 1. Create an OAuth Client
+In Tailscale Admin Console → Settings → OAuth clients, generate a client with:
+- ✅ `auth_keys` scope, write access
+- ✅ Assigned the `tag:exitnode` tag
 
-Add it to your `.env` file as `TAILSCALE_AUTH_KEY`.
+Add the secret to your `.env` file as `TAILSCALE_OAUTH_SECRET`.
+
+Use an OAuth client rather than an auth key. Auth keys cap at 90 days and
+cannot be renewed, so a stored one stops working a quarter after you set it up,
+and the symptom is nodes that boot fine and never join. OAuth client secrets do
+not expire; Tailscale mints a fresh single-use tagged key from the secret each
+time a node registers.
 
 #### 2. Update ACL Policy
 Add this to your Tailscale ACL at https://login.tailscale.com/admin/acls:
@@ -497,7 +501,7 @@ source .env
 **Using direct exports:**
 ```bash
 export TAILSCALE_API_TOKEN=tskey-api-xxxxx
-export TAILSCALE_AUTH_KEY=tskey-auth-xxxxx
+export TAILSCALE_OAUTH_SECRET=tskey-client-xxxxx
 export TSE_AUTH_TOKEN=xxxxx
 export TSE_LAMBDA_URL=https://xxxxx.lambda-url.us-east-2.on.aws/
 ```
