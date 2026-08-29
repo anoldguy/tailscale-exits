@@ -48,20 +48,36 @@ func New(ctx context.Context, region string) (*Service, error) {
 	}, nil
 }
 
-// userDataTemplate defines the bash script for Tailscale installation
+// userDataTemplate defines the bash script for Tailscale installation.
+//
+// This installs from the static tarball rather than tailscale.com/install.sh.
+// The install script adds a yum repo, and refreshing AL2023's repo metadata
+// needs more memory than a t4g.nano has, so dnf gets OOM-killed and Tailscale
+// never lands. The tarball is a download and a copy, which fits in 512MB.
 const userDataTemplate = `#!/bin/bash
 set -e
+trap 'echo "tse-setup FAILED at line $LINENO: $BASH_COMMAND"' ERR
 
-# Install Tailscale
-curl -fsSL https://tailscale.com/install.sh | sh
-
-# Start Tailscale with exit node advertisement
-tailscale up --authkey={{.AuthKey}} --advertise-exit-node --hostname=exit-{{.Region}}
-
-# Enable IP forwarding
+# Enable IP forwarding before advertising, or tailscaled comes up unable to route
 echo 'net.ipv4.ip_forward = 1' >> /etc/sysctl.conf
 echo 'net.ipv6.conf.all.forwarding = 1' >> /etc/sysctl.conf
 sysctl -p
+
+# Install Tailscale from the static tarball (no package manager, no OOM)
+cd /var/tmp
+VERSION=$(curl -fsSL 'https://pkgs.tailscale.com/stable/?mode=json' | grep -o '"TarballsVersion": *"[^"]*"' | cut -d'"' -f4)
+echo "Installing Tailscale ${VERSION} for arm64"
+curl -fsSL "https://pkgs.tailscale.com/stable/tailscale_${VERSION}_arm64.tgz" | tar xzf -
+cd "tailscale_${VERSION}_arm64"
+install -m 755 tailscale /usr/bin/tailscale
+install -m 755 tailscaled /usr/sbin/tailscaled
+install -m 644 systemd/tailscaled.service /etc/systemd/system/tailscaled.service
+install -m 644 systemd/tailscaled.defaults /etc/default/tailscaled
+systemctl daemon-reload
+systemctl enable --now tailscaled
+
+# Start Tailscale with exit node advertisement
+tailscale up --authkey={{.AuthKey}} --advertise-exit-node --hostname=exit-{{.Region}}
 
 # Log completion
 echo "Tailscale exit node setup complete for region: {{.Region}}" | logger -t tse-setup

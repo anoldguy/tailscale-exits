@@ -40,7 +40,8 @@ func TestGenerateUserData(t *testing.T) {
 			// Should contain expected elements
 			expectedElements := []string{
 				"#!/bin/bash",
-				"curl -fsSL https://tailscale.com/install.sh",
+				"pkgs.tailscale.com/stable/",
+				"systemctl enable --now tailscaled",
 				"tailscale up",
 				"--authkey=" + tt.authKey,
 				"--advertise-exit-node",
@@ -55,6 +56,26 @@ func TestGenerateUserData(t *testing.T) {
 				}
 			}
 
+			// The package-manager install path OOM-kills dnf on a 512MB t4g.nano,
+			// so the static tarball is the only install method that fits.
+			forbidden := []string{
+				"tailscale.com/install.sh",
+				"yum install",
+				"dnf install",
+			}
+
+			for _, banned := range forbidden {
+				if strings.Contains(script, banned) {
+					t.Errorf("generateUserData script must not use a package manager: %s", banned)
+				}
+			}
+
+			// IP forwarding must be enabled before we advertise as an exit node,
+			// otherwise tailscaled warns and the node comes up unable to route.
+			if strings.Index(script, "net.ipv4.ip_forward = 1") > strings.Index(script, "tailscale up") {
+				t.Errorf("generateUserData script should enable IP forwarding before 'tailscale up'")
+			}
+
 			// Should start with shebang
 			if !strings.HasPrefix(script, "#!/bin/bash") {
 				t.Errorf("generateUserData script should start with #!/bin/bash")
@@ -63,6 +84,12 @@ func TestGenerateUserData(t *testing.T) {
 			// Should have set -e for error handling
 			if !strings.Contains(script, "set -e") {
 				t.Errorf("generateUserData script should contain 'set -e' for error handling")
+			}
+
+			// A silent failure is what made the last outage hard to find; the
+			// script must name the line that died in cloud-init-output.log.
+			if !strings.Contains(script, "trap") {
+				t.Errorf("generateUserData script should trap errors and log the failing line")
 			}
 		})
 	}
