@@ -39,20 +39,27 @@ func Setup(ctx context.Context, region string) (*SetupResult, error) {
 		fmt.Println("✓ Infrastructure already deployed")
 		fmt.Println()
 
-		// Deployed is not the same as current. Push the handler anyway, or a
-		// redeploy after a code change is a cheerful no-op and the user is left
+		// Deployed is not the same as current. Push code and environment anyway,
+		// or a redeploy after a change is a cheerful no-op and the user is left
 		// wondering why their fix never reached the exit nodes.
+		oauthSecret, err := requireOAuthSecret()
+		if err != nil {
+			return nil, err
+		}
+
 		clients, err := NewAWSClients(ctx, region)
 		if err != nil {
 			return nil, err
 		}
 
-		if err := buildAndUpdateLambdaCode(ctx, clients); err != nil {
+		// An unset token keeps whatever is already deployed; see
+		// mergeLambdaEnvironment.
+		if err := updateExistingLambda(ctx, clients, oauthSecret, os.Getenv("TSE_AUTH_TOKEN")); err != nil {
 			return nil, err
 		}
 
 		fmt.Println()
-		fmt.Println(ui.Success("✓ Lambda function code updated!"))
+		fmt.Println(ui.Success("✓ Lambda function code and environment updated!"))
 		fmt.Println()
 
 		// Still need to return auth token even if already deployed
@@ -69,9 +76,9 @@ func Setup(ctx context.Context, region string) (*SetupResult, error) {
 	fmt.Println()
 
 	// 2. Get secrets from environment
-	tailscaleOAuthSecret := os.Getenv("TAILSCALE_OAUTH_SECRET")
-	if tailscaleOAuthSecret == "" {
-		return nil, fmt.Errorf("TAILSCALE_OAUTH_SECRET environment variable not set\n\nHint: Export your Tailscale OAuth client secret:\n  export TAILSCALE_OAUTH_SECRET=tskey-client-...")
+	tailscaleOAuthSecret, err := requireOAuthSecret()
+	if err != nil {
+		return nil, err
 	}
 
 	// Generate or reuse auth token
@@ -149,8 +156,8 @@ func Setup(ctx context.Context, region string) (*SetupResult, error) {
 			return nil, err
 		}
 	} else {
-		// Function survived a partial teardown; refresh its code.
-		if err := buildAndUpdateLambdaCode(ctx, clients); err != nil {
+		// Function survived a partial teardown; refresh code and environment.
+		if err := updateExistingLambda(ctx, clients, tailscaleOAuthSecret, tseAuthToken); err != nil {
 			return nil, err
 		}
 	}
@@ -186,9 +193,10 @@ func Setup(ctx context.Context, region string) (*SetupResult, error) {
 	}, nil
 }
 
-// buildAndUpdateLambdaCode recompiles the handler and ships it to the existing
-// function, with the same spinners the create path uses.
-func buildAndUpdateLambdaCode(ctx context.Context, clients *AWSClients) error {
+// updateExistingLambda recompiles the handler and syncs both halves of the
+// function: the code and the environment. Shipping only the code is how a
+// renamed variable reaches the handler and never the runtime.
+func updateExistingLambda(ctx context.Context, clients *AWSClients, oauthSecret, tseAuthToken string) error {
 	var zipBytes []byte
 	if err := ui.WithSpinner("Building Lambda function (linux/arm64)", func() error {
 		var err error
@@ -198,9 +206,32 @@ func buildAndUpdateLambdaCode(ctx context.Context, clients *AWSClients) error {
 		return err
 	}
 
-	return ui.WithSpinner("Updating Lambda function code", func() error {
+	if err := ui.WithSpinner("Updating Lambda function code", func() error {
 		return updateLambdaCode(ctx, clients, FunctionName, zipBytes)
+	}); err != nil {
+		return err
+	}
+
+	// Lambda rejects a configuration update while the code update is in flight.
+	if err := ui.WithSpinner("Waiting for code update to settle", func() error {
+		return waitForLambdaUpdate(ctx, clients, FunctionName)
+	}); err != nil {
+		return err
+	}
+
+	return ui.WithSpinner("Updating Lambda environment", func() error {
+		return updateLambdaConfiguration(ctx, clients, FunctionName, oauthSecret, tseAuthToken)
 	})
+}
+
+// requireOAuthSecret reads the OAuth client secret every deploy path needs.
+func requireOAuthSecret() (string, error) {
+	secret := os.Getenv("TAILSCALE_OAUTH_SECRET")
+	if secret == "" {
+		return "", fmt.Errorf("TAILSCALE_OAUTH_SECRET environment variable not set\n\nHint: Export your Tailscale OAuth client secret:\n  export TAILSCALE_OAUTH_SECRET=tskey-client-...")
+	}
+
+	return secret, nil
 }
 
 // generateAuthToken creates a cryptographically secure random token.

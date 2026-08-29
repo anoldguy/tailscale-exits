@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/anoldguy/tse/cmd/tse/ui"
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -285,6 +286,70 @@ func updateLambdaCode(ctx context.Context, clients *AWSClients, functionName str
 	})
 	if err != nil {
 		return fmt.Errorf("failed to update Lambda function code: %w", err)
+	}
+
+	return nil
+}
+
+// mergeLambdaEnvironment merges managed values into the function's existing
+// environment. UpdateFunctionConfiguration replaces the whole variable map, so
+// this reads what is deployed and writes back a superset: variables we do not
+// manage survive, and an unset TSE_AUTH_TOKEN keeps whatever is already live
+// rather than blanking out the operator's own API auth.
+func mergeLambdaEnvironment(current map[string]string, oauthSecret, tseAuthToken string) map[string]string {
+	merged := make(map[string]string, len(current)+1)
+	for k, v := range current {
+		merged[k] = v
+	}
+
+	// Left over from before the OAuth switch; it is an expired 90-day key.
+	delete(merged, "TAILSCALE_AUTH_KEY")
+
+	merged["TAILSCALE_OAUTH_SECRET"] = oauthSecret
+	if tseAuthToken != "" {
+		merged["TSE_AUTH_TOKEN"] = tseAuthToken
+	}
+
+	return merged
+}
+
+// updateLambdaConfiguration syncs the function's environment with the local
+// one. Code and configuration are separate API calls, and shipping only the
+// former is how a renamed variable reaches the handler but never the runtime.
+func updateLambdaConfiguration(ctx context.Context, clients *AWSClients, functionName string, oauthSecret, tseAuthToken string) error {
+	currentCfg, err := clients.Lambda.GetFunctionConfiguration(ctx, &lambda.GetFunctionConfigurationInput{
+		FunctionName: aws.String(functionName),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to read Lambda configuration: %w", err)
+	}
+
+	var current map[string]string
+	if currentCfg.Environment != nil {
+		current = currentCfg.Environment.Variables
+	}
+
+	_, err = clients.Lambda.UpdateFunctionConfiguration(ctx, &lambda.UpdateFunctionConfigurationInput{
+		FunctionName: aws.String(functionName),
+		Environment: &lambdatypes.Environment{
+			Variables: mergeLambdaEnvironment(current, oauthSecret, tseAuthToken),
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("failed to update Lambda configuration: %w", err)
+	}
+
+	return nil
+}
+
+// waitForLambdaUpdate blocks until an in-flight update settles. Lambda rejects
+// overlapping code and configuration updates with ResourceConflictException.
+func waitForLambdaUpdate(ctx context.Context, clients *AWSClients, functionName string) error {
+	waiter := lambda.NewFunctionUpdatedV2Waiter(clients.Lambda)
+	if err := waiter.Wait(ctx, &lambda.GetFunctionInput{
+		FunctionName: aws.String(functionName),
+	}, 2*time.Minute); err != nil {
+		return fmt.Errorf("timed out waiting for Lambda update to settle: %w", err)
 	}
 
 	return nil
